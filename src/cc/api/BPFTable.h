@@ -78,6 +78,10 @@ template <class KeyType, class ValueType>
 class BPFTableBase {
  public:
   size_t capacity() { return desc.max_entries; }
+  int fd() const { return desc.fd; }
+
+  // TODO: It is here only for backward compatibility
+  int get_fd() const { return fd(); }
 
   StatusTuple string_to_key(const std::string& key_str, KeyType* key) {
     return desc.key_sscanf(key_str.c_str(), key);
@@ -105,6 +109,10 @@ class BPFTableBase {
 
   int get_fd() {
     return desc.fd;
+  }
+  
+  const TableDesc &getTableDescription() {
+      return desc;
   }
 
  protected:
@@ -136,8 +144,8 @@ class BPFTable : public BPFTableBase<void, void> {
   BPFTable(const TableDesc& desc);
 
   StatusTuple get_value(const std::string& key_str, std::string& value);
-  StatusTuple get_value(const std::string& key_str,
-                        std::vector<std::string>& value);
+  StatusTuple get_value(void *key, std::vector<std::string>& value);
+  StatusTuple get_value(const std::string& key_str, std::vector<std::string>& value_str);
 
   StatusTuple update_value(const std::string& key_str,
                            const std::string& value_str);
@@ -147,7 +155,13 @@ class BPFTable : public BPFTableBase<void, void> {
   StatusTuple remove_value(const std::string& key_str);
 
   StatusTuple clear_table_non_atomic();
+  // TODO: It is here only for backward compatibility
+  StatusTuple clear();
   StatusTuple get_table_offline(std::vector<std::pair<std::string, std::string>> &res);
+  StatusTuple get_table_offline(std::vector<std::pair<std::string, std::string>> &res, unsigned int max_entries);
+  StatusTuple get_table_offline_raw(std::vector<std::pair<std::unique_ptr<void, decltype(::free)*>, std::unique_ptr<void, decltype(::free)*>>> &res);
+  StatusTuple get_table_offline_percpu(std::vector<std::pair<std::string, std::vector<std::string>>> &res);
+  bool is_percpu_table();
 
   static size_t get_possible_cpu_count();
 };
@@ -499,6 +513,15 @@ class BPFMapInMapTable : public BPFTableBase<KeyType, int> {
       return StatusTuple(-1, "Error removing value: %s", std::strerror(errno));
     return StatusTuple::OK();
   }
+};
+
+class BPFArrayOfMapTable : public BPFMapInMapTable<int> {
+public:
+  BPFArrayOfMapTable(const TableDesc& desc);
+  
+  StatusTuple get_value(const int& index, int& value);
+  int operator[](const int& key);
+  std::vector<int> get_table_offline();
 };
 
 class BPFSockmapTable : public BPFTableBase<int, int> {

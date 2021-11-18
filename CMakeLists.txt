@@ -7,10 +7,6 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "path to install" FORCE)
-endif()
-
 enable_testing()
 
 # populate submodules (libbpf)
@@ -52,6 +48,7 @@ option(ENABLE_RTTI "Enable compiling with real time type information" OFF)
 option(ENABLE_LLVM_SHARED "Enable linking LLVM as a shared library" OFF)
 option(ENABLE_CLANG_JIT "Enable Loading BPF through Clang Frontend" ON)
 option(ENABLE_USDT "Enable User-level Statically Defined Tracing" ON)
+option(ENABLE_DYNAMIC_COMPILER "Enable the use of the dynamic compilation framework" ON)
 option(ENABLE_EXAMPLES "Build examples" ON)
 option(ENABLE_MAN "Build man pages" ON)
 option(ENABLE_TESTS "Build tests" ON)
@@ -126,12 +123,12 @@ if (USINGISYSTEM AND GCC_VERSION VERSION_LESS 6.0)
 endif()
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 20)
 
 endif(NOT PYTHON_ONLY)
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall ${CXX_ISYSTEM_DIRS}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wno-comment -Wno-strict-aliasing -Wno-deprecated-declarations")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-comment -Wno-strict-aliasing -Wno-deprecated-declarations ${CXX_ISYSTEM_DIRS}")
 
 add_subdirectory(src)
 add_subdirectory(introspection)

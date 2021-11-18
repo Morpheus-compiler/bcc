@@ -58,7 +58,9 @@ class TableDesc {
         key_snprintf(that.key_snprintf),
         leaf_snprintf(that.leaf_snprintf),
         is_shared(that.is_shared),
-        is_extern(that.is_extern) {}
+        is_extern(that.is_extern),
+        is_read_only(that.is_read_only),
+        inner_map_name(that.inner_map_name) {}
 
  public:
   TableDesc()
@@ -69,9 +71,10 @@ class TableDesc {
         max_entries(0),
         flags(0),
         is_shared(false),
-        is_extern(false) {}
+        is_extern(false),
+        is_read_only(false) {}
   TableDesc(const std::string &name, FileDesc &&fd, int type, size_t key_size,
-            size_t leaf_size, size_t max_entries, int flags)
+            size_t leaf_size, size_t max_entries, int flags, bool is_read_only = false)
       : name(name),
         fd(std::move(fd)),
         type(type),
@@ -80,7 +83,8 @@ class TableDesc {
         max_entries(max_entries),
         flags(flags),
         is_shared(false),
-        is_extern(false) {}
+        is_extern(false),
+        is_read_only(is_read_only) {}
   TableDesc(TableDesc &&that) = default;
 
   TableDesc &operator=(TableDesc &&that) = default;
@@ -102,8 +106,10 @@ class TableDesc {
   sscanf_fn leaf_sscanf;
   snprintf_fn key_snprintf;
   snprintf_fn leaf_snprintf;
-  bool is_shared;
-  bool is_extern;
+  bool is_shared; // shared with other modules (PUBLIC of SHARED)
+  bool is_extern; // created by another module ("extern")
+  bool is_read_only;
+  std::string inner_map_name;
 };
 
 /// MapTypesVisitor gets notified of new bpf tables, and has a chance to parse

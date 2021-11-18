@@ -16,8 +16,8 @@
 
 %skeleton "lalr1.cc"
 %defines
-%define namespace "ebpf::cc"
-%define parser_class_name "BisonParser"
+%define api.namespace { ebpf::cc }
+%define api.parser.class { BisonParser }
 %parse-param { ebpf::cc::Lexer &lexer }
 %parse-param { ebpf::cc::Parser &parser }
 %lex-param { ebpf::cc::Lexer &lexer }

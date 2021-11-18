@@ -28,6 +28,9 @@
 #include <sys/types.h>
 #include <utility>
 #include <vector>
+#include <mutex>
+#include <glob.h>
+#include <chrono>  // for high_resolution_clock
 
 #include "bcc_exception.h"
 #include "bcc_elf.h"
@@ -35,7 +38,7 @@
 #include "bpf_module.h"
 #include "common.h"
 #include "libbpf.h"
-#include "perf_reader.h"
+#include "macro_logger.h"
 #include "syms.h"
 #include "table_storage.h"
 #include "usdt.h"
@@ -82,7 +85,7 @@ std::string uint_to_hex(uint64_t value) {
 }
 
 std::string sanitize_str(std::string str, bool (*validator)(char),
-                         char replacement = '_') {
+                          char replacement = '_') {
   for (size_t i = 0; i < str.length(); i++)
     if (!validator(str[i]))
       str[i] = replacement;
@@ -117,9 +120,9 @@ StatusTuple BPF::init(const std::string& bpf_program,
       return init_stp;
     }
   }
-
+  
   auto flags_len = cflags.size();
-  const char* flags[flags_len];
+  const char *flags[flags_len];
   for (size_t i = 0; i < flags_len; i++)
     flags[i] = cflags[i].c_str();
 
@@ -128,18 +131,133 @@ StatusTuple BPF::init(const std::string& bpf_program,
     init_fail_reset();
     return StatusTuple(-1, "Unable to initialize BPF program");
   }
+  
+  if (dynamic_opt_enabled_) {
+    // Create the dynamic compiler instance
+    auto &dynamic_compiler = MorpheusCompiler::getInstance();
+
+    LOG_INFO("[BPF] MorpheusCompiler instance created. Spawn optimization thread");
+
+    // Create the main dynamic optimization thread
+    optimization_thread_ = std::thread(&BPF::optimization_thread_main, this);
+
+    if (DYN_COMPILER_ENABLE_GUARDS && DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+      dynamic_callback_id_ = dynamic_compiler.registerCallback(
+              std::bind(&BPF::callback_update_guard, this, std::placeholders::_1, std::placeholders::_2), bpf_module_->getRuntimeMapToGuards());
+    }
+
+    dynamic_compiler.setDynamicCompiler(true);
+  }
 
   return StatusTuple::OK();
-};
+}
+
+void BPF::optimization_thread_main() {
+  uint16_t i = 0;
+
+  std::unique_lock<std::mutex> lk(opt_enable_opt_mutex_);
+  cv_enable_opt.wait(lk, [this]{return (opt_ready_ || quit_thread_);}); 
+
+  while (i < DYNAMIC_OPTIMIZED_TIMEOUT_INIT && !quit_thread_) {
+    std::this_thread::sleep_for(std::chrono::seconds(DYNAMIC_OPTIMIZER_TIMEOUT_STEPS));
+    i++;
+  }
+
+  i = 0;
+  while (!quit_thread_) {
+    std::this_thread::sleep_for(std::chrono::seconds(DYNAMIC_OPTIMIZER_TIMEOUT_STEPS));
+    i+=DYNAMIC_OPTIMIZER_TIMEOUT_STEPS;
+
+    // LOG_DEBUG("[BPF] Passed: %d, Name: %s, Type: %s", i, dynamic_opt_func_name_.c_str(),
+    //           std::to_string(dynamic_opt_prog_type_).c_str());
+    if (i >= DYNAMIC_OPTIMIZER_TIMEOUT && !dynamic_opt_func_name_.empty() && ebpf::MorpheusCompiler::getInstance().dynamicCompilerEnabled()) {
+      std::lock_guard<std::mutex> opt_guard(opt_mutex_);
+      i = 0;
+      // This is the optimization toolchain
+      // Record start time
+      auto compiler_start = std::chrono::high_resolution_clock::now();
+      if (bpf_module_->run_dynamic_opt_pass_manager(dynamic_opt_func_name_) == BPFModule::NO_MODULE_CHANGES) {
+        // No changes have been applied to the current module, skip it!
+        LOG_INFO("No changes detected to the current module. Skipping reloading!");
+        continue;
+      }
+      // Record end time
+      auto compiler_finish = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double, std::milli> compiler_elapsed = compiler_finish - compiler_start;
+      std::cout << "[Morpheus] Time to execute entire compiler pipeline: " << compiler_elapsed.count() << " ms\n";
+
+      int new_fd = -1, old_fd = -1;
+      if (funcs_.find(dynamic_opt_func_name_) != funcs_.end()) {
+        old_fd = funcs_[dynamic_opt_func_name_];
+      }
+      
+      auto load_start = std::chrono::high_resolution_clock::now();
+      // This is where the program is updated
+      auto load_res = load_func(dynamic_opt_func_name_, dynamic_opt_prog_type_, new_fd, true);
+      auto load_end = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double, std::milli> load_elapsed = load_end - load_start;
+      std::cout << "[Morpheus] Time to load eBPF program in kernel: " << load_elapsed.count() << " ms\n";
+
+      if (load_res.code() != 0) {
+        // logger->error("failed to load XDP program: {0}", load_res.msg());
+        LOG_ERROR("[BPF] Failed to load program: %s", load_res.msg().c_str());
+        LOG_ERROR("[BPF] Name: %s, Type: %s", dynamic_opt_func_name_.c_str(),
+                  std::to_string(dynamic_opt_prog_type_).c_str());
+        // TODO: We should send a notification to the main thread to stop the execution
+        quit_thread_ = true;
+        assert(false && "Failed to load the program. Cannot continue!");
+        //throw BPFError("Failed to load XDP program: " + load_res.msg());
+      } else {
+        LOG_INFO("[BPF] New optimized code re-loaded");
+
+        if (DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+          auto &dynamic_compiler = MorpheusCompiler::getInstance();
+          dynamic_compiler.update_filtered_map_ids(dynamic_callback_id_);
+        }
+
+        if (dynamic_opt_callback_ && dynamic_opt_callback_(new_fd)) {
+          auto res = unload_func(old_fd);
+          if (res.code() != 0) {
+            LOG_ERROR("[BPF] Failed to Unload program: %s\n", load_res.msg().c_str());
+            LOG_ERROR("[BPF] Name: %s, Type: %s\n", dynamic_opt_func_name_.c_str(),
+                      std::to_string(dynamic_opt_prog_type_).c_str());
+          }
+        }
+      }
+    }
+  }
+}
+
+void BPF::callback_update_guard(MorpheusCompiler::map_event event, int map_fd) {
+  std::lock_guard<std::mutex> opt_guard(opt_mutex_);
+  bpf_module_->update_guard(event, map_fd);
+}
+
+void BPF::enable_morpheus() {
+  opt_ready_ = true;
+  cv_enable_opt.notify_all();
+}
 
 BPF::~BPF() {
-  auto res = detach_all();
-  if (res.code() != 0)
-    std::cerr << "Failed to detach all probes on destruction: " << std::endl
-              << res.msg() << std::endl;
-  bcc_free_buildsymcache(bsymcache_);
-  bsymcache_ = NULL;
-}
+    if (dynamic_opt_enabled_) {
+      std::lock_guard<std::mutex> opt_guard(opt_mutex_);
+      if (DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+        auto &dynamic_compiler = MorpheusCompiler::getInstance();
+        dynamic_compiler.unregisterCallback(dynamic_callback_id_);
+      }
+
+      quit_thread_ = true;
+      cv_enable_opt.notify_all();
+      optimization_thread_.join();
+    }
+
+    auto res = detach_all();
+    if (res.code() != 0)
+      std::cerr << "Failed to detach all probes on destruction: " << std::endl
+                << res.msg() << std::endl;
+    bcc_free_buildsymcache(bsymcache_);
+    bsymcache_ = NULL;
+  }
 
 StatusTuple BPF::detach_all() {
   bool has_error = false;
@@ -340,8 +458,7 @@ StatusTuple BPF::attach_usdt(const USDT& usdt, pid_t pid) {
       return attach_usdt_without_validation(u, pid);
     }
   }
-
-  return StatusTuple(-1, "USDT %s not found", usdt.print_name().c_str());
+  return StatusTuple(StatusTuple::Code::UNKNOWN, "");
 }
 
 StatusTuple BPF::attach_usdt_all() {
@@ -671,8 +788,8 @@ int BPF::poll_perf_buffer(const std::string& name, int timeout_ms) {
 }
 
 StatusTuple BPF::load_func(const std::string& func_name, bpf_prog_type type,
-                           int& fd, unsigned flags) {
-  if (funcs_.find(func_name) != funcs_.end()) {
+                           int& fd, bool force_loading, unsigned flags) {
+  if (funcs_.find(func_name) != funcs_.end() && !force_loading) {
     fd = funcs_[func_name];
     return StatusTuple::OK();
   }
@@ -702,6 +819,13 @@ StatusTuple BPF::load_func(const std::string& func_name, bpf_prog_type type,
   if (ret < 0)
     fprintf(stderr, "WARNING: cannot get prog tag, ignore saving source with program tag\n");
   funcs_[func_name] = fd;
+
+  if (dynamic_opt_enabled_) {
+    dynamic_opt_func_name_ = func_name;
+    dynamic_opt_prog_type_ = type;
+    //fprintf(stdout, "Update needed variables: %s, %s\n", dynamic_opt_func_name_.c_str(), std::to_string(dynamic_opt_prog_type_).c_str());
+  }
+  
   return StatusTuple::OK();
 }
 
@@ -710,12 +834,20 @@ StatusTuple BPF::unload_func(const std::string& func_name) {
   if (it == funcs_.end())
     return StatusTuple::OK();
 
-  int res = close(it->second);
-  if (res != 0)
-    return StatusTuple(-1, "Can't close FD for %s: %d", it->first.c_str(), res);
+      int res = close(it->second);
+      if (res != 0)
+        return StatusTuple(-1, "Can't close FD for %s: %d", it->first.c_str(), res);
 
   funcs_.erase(it);
   return StatusTuple::OK();
+}
+
+StatusTuple BPF::unload_func(const int &fd) {
+  int res = close(fd);
+  if (res != 0)
+    return StatusTuple(-1, "Can't close FD %d", res);
+
+  return StatusTuple(0);
 }
 
 StatusTuple BPF::attach_func(int prog_fd, int attachable_fd,
@@ -739,22 +871,6 @@ StatusTuple BPF::detach_func(int prog_fd, int attachable_fd,
                        prog_fd, attachable_fd, attach_type, res);
 
   return StatusTuple::OK();
-}
-
-std::string BPF::get_syscall_fnname(const std::string& name) {
-  if (syscall_prefix_ == nullptr) {
-    KSyms ksym;
-    uint64_t addr;
-
-    if (ksym.resolve_name(nullptr, "sys_bpf", &addr))
-      syscall_prefix_.reset(new std::string("sys_"));
-    else if (ksym.resolve_name(nullptr, "__x64_sys_bpf", &addr))
-      syscall_prefix_.reset(new std::string("__x64_sys_"));
-    else
-      syscall_prefix_.reset(new std::string());
-  }
-
-  return *syscall_prefix_ + name;
 }
 
 StatusTuple BPF::check_binary_symbol(const std::string& binary_path,
@@ -781,14 +897,30 @@ StatusTuple BPF::check_binary_symbol(const std::string& binary_path,
   return StatusTuple::OK();
 }
 
-std::string BPF::get_kprobe_event(const std::string& kernel_func,
+std::string BPF::get_syscall_fnname(const std::string& name) {
+  if (syscall_prefix_ == nullptr) {
+    KSyms ksym;
+    uint64_t addr;
+
+    if (ksym.resolve_name(nullptr, "sys_bpf", &addr))
+      syscall_prefix_.reset(new std::string("sys_"));
+    else if (ksym.resolve_name(nullptr, "__x64_sys_bpf", &addr))
+      syscall_prefix_.reset(new std::string("__x64_sys_"));
+    else
+      syscall_prefix_.reset(new std::string());
+  }
+
+  return *syscall_prefix_ + name;
+}
+
+std::string BPF::get_kprobe_event(const std::string &kernel_func,
                                   bpf_probe_attach_type type) {
   std::string res = attach_type_prefix(type) + "_";
   res += sanitize_str(kernel_func, &BPF::kprobe_event_validator);
   return res;
 }
 
-BPFProgTable BPF::get_prog_table(const std::string& name) {
+BPFProgTable BPF::get_prog_table(const std::string &name) {
   TableStorage::iterator it;
   if (bpf_module_->table_storage().Find(Path({bpf_module_->id(), name}), it))
     return BPFProgTable(it->second);
@@ -802,7 +934,7 @@ BPFCgroupArray BPF::get_cgroup_array(const std::string& name) {
   return BPFCgroupArray({});
 }
 
-BPFDevmapTable BPF::get_devmap_table(const std::string& name) {
+BPFDevmapTable BPF::get_devmap_table(const std::string &name) {
   TableStorage::iterator it;
   if (bpf_module_->table_storage().Find(Path({bpf_module_->id(), name}), it))
     return BPFDevmapTable(it->second);

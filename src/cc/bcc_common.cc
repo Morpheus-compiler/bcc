@@ -19,7 +19,7 @@
 extern "C" {
 void * bpf_module_create_b(const char *filename, const char *proto_filename, unsigned flags,
                            const char *dev_name) {
-  auto mod = new ebpf::BPFModule(flags, nullptr, true, "", true, dev_name);
+  auto mod = new ebpf::BPFModule(flags, nullptr, true, false, "", true, "", dev_name);
   if (mod->load_b(filename, proto_filename) != 0) {
     delete mod;
     return nullptr;
@@ -28,8 +28,8 @@ void * bpf_module_create_b(const char *filename, const char *proto_filename, uns
 }
 
 void * bpf_module_create_c(const char *filename, unsigned flags, const char *cflags[],
-                           int ncflags, bool allow_rlimit, const char *dev_name) {
-  auto mod = new ebpf::BPFModule(flags, nullptr, true, "", allow_rlimit, dev_name);
+                           int ncflags, bool allow_rlimit, const char *dev_name, bool dynamic_opt_enabled) {
+  auto mod = new ebpf::BPFModule(flags, nullptr, true, dynamic_opt_enabled, "", allow_rlimit, "", dev_name);
   if (mod->load_c(filename, cflags, ncflags) != 0) {
     delete mod;
     return nullptr;
@@ -38,8 +38,8 @@ void * bpf_module_create_c(const char *filename, unsigned flags, const char *cfl
 }
 
 void * bpf_module_create_c_from_string(const char *text, unsigned flags, const char *cflags[],
-                                       int ncflags, bool allow_rlimit, const char *dev_name) {
-  auto mod = new ebpf::BPFModule(flags, nullptr, true, "", allow_rlimit, dev_name);
+                                       int ncflags, bool allow_rlimit, const char *dev_name, bool dynamic_opt_enabled) {
+  auto mod = new ebpf::BPFModule(flags, nullptr, true, dynamic_opt_enabled, "", allow_rlimit, "", dev_name);
   if (mod->load_string(text, cflags, ncflags) != 0) {
     delete mod;
     return nullptr;
