@@ -28,6 +28,7 @@
 #include <queue>
 #include <sstream>
 #include <iomanip>
+#include <spdlog/spdlog.h>
 
 namespace ebpf {
 namespace dyn_opt {
@@ -50,12 +51,12 @@ CallInst *getCompleteBPFMapLookupCallInst(Instruction &instruction, bool isInstr
   if (DILocation *Loc = callInst->getDebugLoc()) {
     if (auto scope = Loc->getScope()) {
       if (scope->getName().startswith("bpf_map_lookup_elem_")) {
-        LOG_DEBUG("[utils] Found map lookup call");
+        spdlog::get("Morpheus")->trace("[utils] Found map lookup call");
 
         if (MDNode *N = callInst->getMetadata("opt.hasBeenProcessed")) {
           auto processed = cast<MDString>(N->getOperand(0))->getString();
           if (processed.contains("true") && !isInstrumentationPass) {
-            LOG_DEBUG("[utils] Instruction already optimized. Skipping!");
+            spdlog::get("Morpheus")->trace("[utils] Instruction already optimized. Skipping!");
             return nullptr;
           }
         }
@@ -63,7 +64,7 @@ CallInst *getCompleteBPFMapLookupCallInst(Instruction &instruction, bool isInstr
         if (MDNode *N = callInst->getMetadata("opt.isInstrumentedMap")) {
           auto processed = cast<MDString>(N->getOperand(0))->getString();
           if (processed.contains("true")) {
-            LOG_DEBUG("[utils] This is a map used for instrumentation. Skipping!");
+            spdlog::get("Morpheus")->trace("[utils] This is a map used for instrumentation. Skipping!");
             return nullptr;
           }
         }
@@ -71,7 +72,7 @@ CallInst *getCompleteBPFMapLookupCallInst(Instruction &instruction, bool isInstr
         if (MDNode *N = callInst->getMetadata("opt.isGuardMap")) {
           auto processed = cast<MDString>(N->getOperand(0))->getString();
           if (processed.contains("true")) {
-            LOG_DEBUG("[utils] This is a map used for guards. Skipping!");
+            spdlog::get("Morpheus")->trace("[utils] This is a map used for guards. Skipping!");
             return nullptr;
           }
         }
@@ -79,14 +80,13 @@ CallInst *getCompleteBPFMapLookupCallInst(Instruction &instruction, bool isInstr
         if (MDNode *N = callInst->getMetadata("opt.cannotBeOptimized")) {
           auto processed = cast<MDString>(N->getOperand(0))->getString();
           if (processed.contains("true")) {
-            LOG_DEBUG("[utils] Instruction cannot be optimized. Skipping!");
+            spdlog::get("Morpheus")->trace("[utils] Instruction cannot be optimized. Skipping!");
             return nullptr;
           }
         }
 
         return callInst;
       } else {
-        //LOG_DEBUG("[utils] Found map call, but it is not a lookup. Skipping!");
         return nullptr;
       }
     }
@@ -110,11 +110,10 @@ CallInst *getCompleteBPFMapUpdateCallInst(Instruction &instruction, bool isInstr
   if (DILocation *Loc = callInst->getDebugLoc()) {
     if (auto scope = Loc->getScope()) {
       if (scope->getName().startswith("bpf_map_update_elem")) {
-        LOG_DEBUG("[utils] Found map update call");
+        spdlog::get("Morpheus")->trace("[utils] Found map update call");
 
         return callInst;
       } else {
-        //LOG_DEBUG("[utils] Found map call, but it is not an update. Skipping!");
         return nullptr;
       }
     }
@@ -147,7 +146,7 @@ CallInst *getBPFMapLookupCallInst(Instruction &instruction, bool isInstrumentati
 
   auto nextInstruction = instruction.getNextNonDebugInstruction();
   if (nextInstruction == nullptr) {
-    LOG_DEBUG("Strange format in the LLVM IR code. Lookup pattern not found!");
+    spdlog::get("Morpheus")->trace("[utils] Strange format in the LLVM IR code. Lookup pattern not found!");
     return nullptr;
   }
 
@@ -156,7 +155,7 @@ CallInst *getBPFMapLookupCallInst(Instruction &instruction, bool isInstrumentati
   helperInstruction = dyn_cast_or_null<CallInst>(newInstruction);
 
   if (helperInstruction == nullptr) {
-    LOG_DEBUG("Strange format in the LLVM IR code. Lookup pattern not found!");
+    spdlog::get("Morpheus")->trace("[utils] Strange format in the LLVM IR code. Lookup pattern not found!");
     return nullptr;
   }
   //assert(helperInstruction != nullptr && "Detected llvm.bpf.pseudo but not the helper instruction");
@@ -164,12 +163,12 @@ CallInst *getBPFMapLookupCallInst(Instruction &instruction, bool isInstrumentati
   if (DILocation *Loc = helperInstruction->getDebugLoc()) {
     if (auto scope = Loc->getScope()) {
       if (scope->getName().startswith("bpf_map_lookup_elem")) {
-        LOG_DEBUG("[utils] Found map lookup call");
+        spdlog::get("Morpheus")->trace("[utils] Found map lookup call");
 
         if (MDNode *N = helperInstruction->getMetadata("opt.hasBeenProcessed")) {
           auto processed = cast<MDString>(N->getOperand(0))->getString();
           if (processed.contains("true") && !isInstrumentationPass) {
-            LOG_DEBUG("[utils] Instruction already optimized. Skipping!");
+            spdlog::get("Morpheus")->trace("[utils] Instruction already optimized. Skipping!");
             return nullptr;
           }
         }
@@ -177,7 +176,7 @@ CallInst *getBPFMapLookupCallInst(Instruction &instruction, bool isInstrumentati
         if (MDNode *N = helperInstruction->getMetadata("opt.isInstrumentedMap")) {
           auto processed = cast<MDString>(N->getOperand(0))->getString();
           if (processed.contains("true")) {
-            LOG_DEBUG("[utils] This is a map used for instrumentation. Skipping!");
+            spdlog::get("Morpheus")->trace("[utils] This is a map used for instrumentation. Skipping!");
             return nullptr;
           }
         }
@@ -185,7 +184,7 @@ CallInst *getBPFMapLookupCallInst(Instruction &instruction, bool isInstrumentati
         if (MDNode *N = helperInstruction->getMetadata("opt.isGuardMap")) {
           auto processed = cast<MDString>(N->getOperand(0))->getString();
           if (processed.contains("true")) {
-            LOG_DEBUG("[utils] This is a map used for guards. Skipping!");
+            spdlog::get("Morpheus")->trace("[utils] This is a map used for guards. Skipping!");
             return nullptr;
           }
         }
@@ -193,14 +192,14 @@ CallInst *getBPFMapLookupCallInst(Instruction &instruction, bool isInstrumentati
         if (MDNode *N = helperInstruction->getMetadata("opt.cannotBeOptimized")) {
           auto processed = cast<MDString>(N->getOperand(0))->getString();
           if (processed.contains("true")) {
-            LOG_DEBUG("[utils] Instruction cannot be optimized. Skipping!");
+            spdlog::get("Morpheus")->trace("[utils] Instruction cannot be optimized. Skipping!");
             return nullptr;
           }
         }
 
         return helperInstruction;
       } else {
-        LOG_DEBUG("[utils] Found map call, but it is not a lookup. Skipping!");
+        spdlog::get("Morpheus")->trace("Found map call, but it is not a lookup. Skipping!");
         return nullptr;
       }
     }
@@ -212,7 +211,7 @@ CallInst *findPseudoFromHelperInstr(Instruction &helperInstruction) {
   auto nextInstruction = helperInstruction.getPrevNonDebugInstruction();
   CallInst *pseudoInstruction = nullptr;
   if (nextInstruction == nullptr) {
-    LOG_DEBUG("Strange format in the LLVM IR code. Lookup pattern not found!");
+    spdlog::get("Morpheus")->trace("[utils] Strange format in the LLVM IR code. Lookup pattern not found!");
     return nullptr;
   }
 
@@ -221,7 +220,7 @@ CallInst *findPseudoFromHelperInstr(Instruction &helperInstruction) {
   pseudoInstruction = dyn_cast_or_null<CallInst>(newInstruction);
 
   if (pseudoInstruction == nullptr) {
-    LOG_DEBUG("Strange format in the LLVM IR code. Lookup pattern not found!");
+    spdlog::get("Morpheus")->trace("[utils] Strange format in the LLVM IR code. Lookup pattern not found!");
     return nullptr;
   }
 
@@ -247,7 +246,7 @@ bool hasMapInMapDebugInfo(Instruction &instruction) {
     llvm::APInt map_fd;
     auto processed = cast<MDString>(N->getOperand(0))->getString();
     if (!processed.getAsInteger(10, map_fd)) {
-      LOG_DEBUG("[utils] Found arrayOfMapFD info!");
+      spdlog::get("Morpheus")->trace("[utils] Found arrayOfMapFD info!");
       return true;
     }
   }
@@ -259,7 +258,7 @@ int getMapInMapFDFromDebugInfo(Instruction &instruction) {
     llvm::APInt map_fd;
     auto processed = cast<MDString>(N->getOperand(0))->getString();
     if (!processed.getAsInteger(10, map_fd)) {
-      LOG_DEBUG("[utils] Found arrayOfMapFD info!");
+      spdlog::get("Morpheus")->trace("[utils] Found arrayOfMapFD info!");
       return map_fd.getSExtValue();
     }
   }
@@ -343,7 +342,7 @@ ConstantInt *getBPFPseudoTableFd(CallInst &instruction) {
 std::tuple<std::vector<int>, ebpf::TableDesc *> getNestedMapInMapTable(LLVMContext &ctx, const int &map_in_map_fd, std::string &bpf_module_id, ebpf::TableStorage *ts,
                                         ebpf::fake_fd_map_def &fake_fd_map, std::vector<ebpf::TableDesc *> &tables) {
   ebpf::TableDesc *mapInMapTable = getTableByFD(map_in_map_fd, bpf_module_id, ts, fake_fd_map, tables);
-  LOG_DEBUG("[utils] getNestedMapInMapTable. Map fd is: %d", map_in_map_fd);
+  spdlog::get("Morpheus")->trace("[utils] getNestedMapInMapTable. Map fd is: {}", map_in_map_fd);
   std::vector<int> runtime_nested_fds;
 
   if (mapInMapTable != nullptr && mapInMapTable->type == BPF_MAP_TYPE_ARRAY_OF_MAPS) {
@@ -355,7 +354,7 @@ std::tuple<std::vector<int>, ebpf::TableDesc *> getNestedMapInMapTable(LLVMConte
         auto nested_table_fd = bpf_map_get_fd_by_id(value);
 
         if (nested_table_fd < 0) {
-          LOG_ERROR("[uilt] Error while retrieving map fd for array of maps");
+          spdlog::get("Morpheus")->error("[utils] Error while retrieving map fd for array of maps");
           assert(false && "Runtime error while retrieving map fd");
         }
 
@@ -368,11 +367,11 @@ std::tuple<std::vector<int>, ebpf::TableDesc *> getNestedMapInMapTable(LLVMConte
     // I can use the innermap fd for this, which is the map used to create the ARRAY_OF_MAP table in the
     // BCC-compatible data plane.
 
-    LOG_DEBUG("[utils] Got runtime values of the nested map. The innermap is: %s", mapInMapTable->inner_map_name.c_str());
+    spdlog::get("Morpheus")->trace("[utils] Got runtime values of the nested map. The innermap is: {}", mapInMapTable->inner_map_name);
 
     ebpf::TableDesc *nestedMapTable = getTableByName(mapInMapTable->inner_map_name, bpf_module_id, ts, fake_fd_map, tables);
     if (nestedMapTable != nullptr) {
-      LOG_DEBUG("[utils] Got nested table");
+      spdlog::get("Morpheus")->trace("[utils] Got nested table");
       return std::make_tuple(runtime_nested_fds, nestedMapTable);
     }
   }
@@ -428,16 +427,16 @@ void readEntriesFromNestedTables(std::vector<std::pair<std::string, std::string>
   res.clear();
 
   if (desc.type != BPF_MAP_TYPE_HASH && desc.type != BPF_MAP_TYPE_LRU_HASH) {
-    LOG_ERROR("[JIT Pass] We currently do not support nested tables different than HASH");
-    assert(false && "[JIT Pass] We currently do not support nested tables different than HASH");
+    spdlog::get("Morpheus")->error("We currently do not support nested tables different than HASH");
+    assert(false && "[utils] We currently do not support nested tables different than HASH");
   }
 
   unsigned int max_entries_per_map = max_entries / nested_map_fds.size();
   int return_code;
   for (auto &fd : nested_map_fds) {
-    LOG_DEBUG("Reading values from map: %d", fd);
+    spdlog::get("Morpheus")->trace("[utils] Reading values from map: {}", fd);
     if ((return_code = bpf_get_first_key(fd, key.get(), desc.key_size)) < 0) {
-      LOG_DEBUG("[JIT Pass] First failed while reading map: %d. Rc: %d, %d", fd, return_code, errno);
+      spdlog::get("Morpheus")->error("[utils] First failed while reading map: {0}. Rc: {1}, {2}", fd, return_code, errno);
       continue;
     }
 
@@ -448,13 +447,13 @@ void readEntriesFromNestedTables(std::vector<std::pair<std::string, std::string>
 
       r = dyn_opt::utils::key_to_string(key.get(), key_str, desc.key_size, desc.key_snprintf);
       if (r.code() != 0) {
-        LOG_ERROR("[JIT Pass] Error while reading map %d key", fd);
+        spdlog::get("Morpheus")->error("[utils] Error while reading map {} key", fd);
         break;
       }
 
       r =  dyn_opt::utils::leaf_to_string(value.get(), value_str, desc.leaf_size, desc.leaf_snprintf);
       if (r.code() != 0) {
-        LOG_ERROR("[JIT Pass] Error while reading map %d value", fd);
+        spdlog::get("Morpheus")->error("[utils] Error while reading map {} value", fd);
         break;
       }
       res.emplace_back(key_str, value_str);
@@ -505,10 +504,6 @@ int getEquivalentPerCPUMap(int type) {
 Value *getKeyValueFromLookupHelperCall(CallInst &helperCall) {
   auto key_value = helperCall.getOperand(1);
   auto bitCastInstruction = dyn_cast<BitCastInst>(key_value);
-  // This instruction should be a BitCast, otherwise there is something wrong
-//                helperCall.print(llvm::errs());
-//                llvm::errs() << "\n",
-//                key_value->print(llvm::errs());
   if (bitCastInstruction != nullptr) {
     auto real_key_value = bitCastInstruction->getOperand(0);
     return real_key_value;
@@ -526,9 +521,6 @@ Value *getKeyPtrFromLookupHelperCall(CallInst &helperCall) {
   } else {
     return key_value;
   }
-//              assert(bitCastInstruction != nullptr);
-
-//              return bitCastInstruction;
 }
 
 ebpf::TableDesc *getTableByFD(ConstantInt &pInt, std::string &bpf_module_id, ebpf::TableStorage *ts,
@@ -569,9 +561,7 @@ ebpf::TableDesc *getTableByFD(const int &pInt, std::string &bpf_module_id, ebpf:
                               ebpf::fake_fd_map_def &fake_fd_map, std::vector<ebpf::TableDesc *> &tables) {
   auto &map_fd = pInt;
   ebpf::TableDesc *table = nullptr;
-  LOG_DEBUG("Calling getTableByFD");
   for (const auto &map : fake_fd_map) {
-    LOG_DEBUG("Map fd: %d", map.first);
     if (map.first == map_fd) {
       auto &map_name = std::get<1>(map.second);
 
@@ -585,8 +575,6 @@ ebpf::TableDesc *getTableByFD(const int &pInt, std::string &bpf_module_id, ebpf:
   }
 
   for (const auto &map : tables) {
-    int fd = map->fd;
-    LOG_DEBUG("Map fd: %d with name: %s", fd, map->name.c_str());
     if (map->fd == map_fd) {
       auto &map_name = map->name;
 
@@ -638,9 +626,6 @@ void remapInstructionsInBB(llvm::BasicBlock &BB, llvm::ValueToValueMapTy &vMap) 
 std::vector<std::string> getTopEntriesFromInstrumentedEntries(std::vector<std::pair<std::string, std::vector<std::string>>> &instrValues, uint maxEntries) {
   std::map<std::string, uint64_t> values_map;
   std::vector<std::string> entries;
-
-  // Declaring the type of Predicate that accepts 2 pairs and return a bool
-  //typedef std::function<bool(std::pair<std::string, uint64_t>, std::pair<std::string, uint64_t>)> Comparator;
 
   // Defining a lambda function to compare two pairs. It will compare two pairs using second field
   auto compFunctor =

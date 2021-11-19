@@ -45,7 +45,6 @@ namespace ebpf {
 
         bool doInitialization(llvm::Module &M) override;
         bool runOnFunction(llvm::Function &pfn) override;
-        void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
         bool doFinalization(llvm::Module &M) override;
         static llvm::Pass *createJITTableRuntimePass(std::string id, std::string func_name, ebpf::TableStorage *ts,
                                                      ebpf::fake_fd_map_def &fake_fd_map,

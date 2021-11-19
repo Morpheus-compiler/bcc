@@ -35,6 +35,10 @@ namespace ebpf {
     }
 
     int MorpheusCompiler::init() {
+      initlogger();
+      // TODO: Make it configurable somewhere
+      logger->set_level(spdlog::level::info);
+
       std::vector<std::string> cflags = {};
       std::unique_lock<std::mutex> dyn_guard(dyn_mutex);
 
@@ -43,33 +47,24 @@ namespace ebpf {
         auto init_res = trace_guard_prog->init(BPF_GUARD_PROG, cflags, {});
 
         if (init_res.code() != 0) {
-          LOG_ERROR("[MorpheusCompiler] Error while initializing map guard tracing program: %s",
-                    init_res.msg().c_str());
+          logger->error("Error while initializing map guard tracing program: {}", init_res.msg());
           return -1;
         }
 
-        //LOG_DEBUG("Function name: %s", fnname.c_str());
         auto attach_res = trace_guard_prog->attach_kprobe("htab_map_update_elem", "on_map_update_elem2");
 
         // attach_res = bpf->attach_tracepoint("bpf:bpf_map_delete_elem", "on_bpf_map_delete_elem");
         if (attach_res.code() != 0) {
-          LOG_ERROR("[MorpheusCompiler] Error while attaching map guard tracing program: %s", init_res.msg().c_str());
+          logger->error(" Error while attaching map guard tracing program: {}", init_res.msg());
           return -2;
         }
 
         attach_res = trace_guard_prog->attach_kprobe("__htab_map_lookup_elem", "on_map_lookup_elem");
 
         if (attach_res.code() != 0) {
-          LOG_ERROR("[MorpheusCompiler] Error while attaching map guard tracing program: %s", init_res.msg().c_str());
+          logger->error(" Error while attaching map guard tracing program: {}", init_res.msg());
           return -2;
         }
-
-        // attach_res = trace_guard_prog->attach_kprobe("trie_lookup_elem", "on_map_trie_lookup_elem");
-
-        // if (attach_res.code() != 0) {
-        //   LOG_ERROR("[MorpheusCompiler] Error while attaching map guard tracing program: %s", init_res.msg().c_str());
-        //   return -2;
-        // }
 
         auto open_res = trace_guard_prog->open_perf_buffer("map_change",
                                                           [](void *cb_cookie, void *p_data, int data_size) {
@@ -85,10 +80,6 @@ namespace ebpf {
                                                               if (c->quit_thread_) return;
 
                                                               c->notify(data->event, data->fd);
-
-                                                              //LOG_DEBUG("[MorpheusCompiler] New map event: %d, fd: %d", data->event, data->fd);
-                                                              //LOG_DEBUG("[MorpheusCompiler] New map change: %d, info.id: %d, data.key: %d", info.id, info.max_entries, info.key_size);
-                                                              //std::cout<<data->event<<","<<info.id<<","<<data->key[0]<<std::endl;
                                                           }, nullptr, this);
 
         quit_thread_ = false;
@@ -109,19 +100,22 @@ namespace ebpf {
 
         auto detach_res = trace_guard_prog->detach_kprobe("map_update_elem");
         if (detach_res.code() != 0) {
-          LOG_ERROR("[MorpheusCompiler] Error while detaching kprobe: %s", detach_res.msg().c_str());
+          logger->error("Error while detaching kprobe: {}", detach_res.msg());
         }
 
         detach_res = trace_guard_prog->detach_kprobe("map_lookup_elem");
         if (detach_res.code() != 0) {
-          LOG_ERROR("[MorpheusCompiler] Error while detaching kprobe: %s", detach_res.msg().c_str());
+          logger->error("Error while detaching kprobe: {}", detach_res.msg());
         }
-
-        // detach_res = trace_guard_prog->detach_kprobe("trie_lookup_elem");
-        // if (detach_res.code() != 0) {
-        //   LOG_ERROR("[MorpheusCompiler] Error while detaching kprobe: %s", detach_res.msg().c_str());
-        // }
       }
+    }
+
+    void MorpheusCompiler::initlogger() {
+      console = std::make_shared<spdlog::sinks::ansicolor_stdout_sink_mt>();
+      std::vector<spdlog::sink_ptr> sinks {console};
+      logger = std::make_shared<spdlog::logger>("Morpheus", sinks.begin(), sinks.end());
+      logger->flush_on(spdlog::level::trace);
+      spdlog::register_logger(logger);
     }
 
     unsigned int MorpheusCompiler::getMaxOffloadedEntries() {

@@ -103,15 +103,10 @@ JITTableRuntimePass::~JITTableRuntimePass() = default;
 // Called once for each module, before the calls on the basic blocks.
 // We could use doFinalization to clear RNG, but that's not needed.
 bool JITTableRuntimePass::doInitialization(Module &M) {
-  // I want the same seed to better debuggability. In the future it should be changed with time(NULL)
+  // I want the same seed to better debugability. In the future it should be changed with time(NULL)
   srand(5678); 
-  //srand(time(NULL));
+  // srand(time(NULL));
   return false;
-}
-
-void JITTableRuntimePass::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
-  //AU.addRequired<DynamicMapOptAnalysisPass>();
-  //AU.addRequired<BPFMapInstrumentationPass>();
 }
 
 // Called for each basic block of the module
@@ -124,7 +119,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
     return false;
   }
 
-  LOG_INFO("[JIT Pass] Processing function: %s", pfn.getName().str().c_str());
+  spdlog::get("Morpheus")->trace("[JIT Pass] Processing function: {}", pfn.getName().str());
 
   LLVMContext &ctx_ = pfn.getContext();
   for (auto bb = pfn.begin(); bb != pfn.end(); bb++) {
@@ -150,7 +145,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
         map_in_map_fd = dyn_opt::utils::getMapInMapFDFromDebugInfo(*helperInstruction);
         if (map_in_map_fd > 0) {
           is_map_in_map_lookup = true;
-          LOG_DEBUG("[JIT Pass] This lookup is referring to a BPF_MAP_IN_MAP with fd: %d", map_in_map_fd);
+          spdlog::get("Morpheus")->trace("[JIT Pass] This lookup is referring to a BPF_MAP_IN_MAP with fd: {}", map_in_map_fd);
           bpfPseudoCallInst = helperInstruction;
         } else {
           continue;
@@ -177,19 +172,18 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
       if (table == nullptr) continue;
       //assert(table != nullptr && "Trying to get a table that does not exist!");
 
-      LOG_INFO("[JIT Pass] Reading runtime values of the map: %s (fd: %d), type: %s",
-                table->name.c_str(), (int) table->fd,
-                dyn_opt::utils::table_type_id_to_string_name(table->type).c_str());
+      spdlog::get("Morpheus")->debug("[JIT Pass] Reading runtime values of the map: {} (fd: {}), type: {}",
+                table->name, (int) table->fd,
+                dyn_opt::utils::table_type_id_to_string_name(table->type));
 
       // First of all I need to understand the type of map that it is using,
       // in order to apply different type of optimizations.
       if (table->type == BPF_MAP_TYPE_HASH || table->type == BPF_MAP_TYPE_LRU_HASH ||
           table->type == BPF_MAP_TYPE_ARRAY || table->type == BPF_MAP_TYPE_LPM_TRIE || table->type == BPF_MAP_TYPE_ARRAY_OF_MAPS) {
         auto genericTable = ebpf::BPFTable(*table);
-        LOG_INFO("[JIT Pass] We are dealing with a %s",
-                  dyn_opt::utils::table_type_id_to_string_name(table->type).c_str());
-        LOG_DEBUG("[JIT Pass] Key desc: %s", table->key_desc.c_str());
-        LOG_DEBUG("[JIT Pass] Leaf desc: %s", table->leaf_desc.c_str());
+        spdlog::get("Morpheus")->debug("[JIT Pass] We are dealing with a {}", dyn_opt::utils::table_type_id_to_string_name(table->type));
+        spdlog::get("Morpheus")->trace("[JIT Pass] Key desc: {}", table->key_desc);
+        spdlog::get("Morpheus")->trace("[JIT Pass] Leaf desc: {}", table->leaf_desc);
 
         if (table->leaf_size >= DYN_OPT_LEAF_SIZE_LIMIT || table->key_size >= DYN_OPT_KEY_SIZE_LIMIT) {
           continue;
@@ -204,11 +198,11 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
         if (is_map_in_map_lookup && nested_map_fds.size() > 0) {
           dyn_opt::utils::readEntriesFromNestedTables(values, nested_map_fds, *table, dynamic_opt_compiler.getMaxOffloadedEntries()*50);
           if (values.size() == 0) {
-            LOG_DEBUG("[JIT Pass] Skip offloading if all values are null in the nested array of maps");
+            spdlog::get("Morpheus")->trace("[JIT Pass] Skip offloading if all values are null in the nested array of maps");
             continue;
           }
         } else if (table->type == BPF_MAP_TYPE_ARRAY_OF_MAPS) {
-          LOG_INFO("[JIT Pass] Read entries from array of maps");
+          spdlog::get("Morpheus")->trace("[JIT Pass] Read entries from array of maps");
           BPFArrayOfMapTable arrayOfMapTable(*table);
           std::vector<int> array_of_map_values = arrayOfMapTable.get_table_offline();
 
@@ -223,7 +217,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
           genericTable.get_table_offline(values, dynamic_opt_compiler.getMaxOffloadedEntries()*50);
         }
 
-        LOG_INFO("[JIT Pass] Size of runtime value is %lu", values.size());
+        spdlog::get("Morpheus")->debug("[JIT Pass] Size of runtime value is {}", values.size());
 
         // Here we are gonna optimize the map based on runtime values.
         // To avoid inconsistency problems I am going to insert a guard that checks the version
@@ -275,11 +269,11 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
         SwitchInst *switchInst = nullptr;
 
         if (values.empty()) {
-          LOG_INFO("[JIT Pass] Map is empty, replacing with null value!!!");
+          spdlog::get("Morpheus")->debug("[JIT Pass] Map is empty, replacing with null value!!!");
           BasicBlock *successGuardBB;
 
           if (DYN_COMPILER_ENABLE_GUARDS && (!table->is_read_only || !dynamic_opt_compiler.isMapROAcrossModules(table->fd))) {
-            LOG_INFO("[JIT Pass] Creating guard for this map since it is not real-only!!!");
+            spdlog::get("Morpheus")->debug("[JIT Pass] Creating guard for this map since it is not real-only!!!");
             successGuardBB = createGuardForTable(ctx_, *table, bb->getTerminator(), Tail, Default);
             auto final_value = std::make_pair(ConstantPointerNull::get(Type::getInt8PtrTy(ctx_)), successGuardBB);
             CaseValues.emplace_back(std::move(final_value));
@@ -301,7 +295,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
             continue;
           }
         } else {
-          LOG_INFO("[JIT Pass] Map is NOT empty, offloading the existing values!!!");
+          spdlog::get("Morpheus")->debug("[JIT Pass] Map is NOT empty, offloading the existing values!!!");
           auto leaf_desc = nlohmann::json::parse(table->leaf_desc);
           nlohmann::json struct_desc;
           AllocaInst *alloca_struct = nullptr;
@@ -353,7 +347,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
           //   Tail
           BasicBlock *OptBB = bb->splitBasicBlock(bb->getTerminator());
           if (DYN_COMPILER_ENABLE_GUARDS && (!table->is_read_only || !dynamic_opt_compiler.isMapROAcrossModules(table->fd))) {
-            LOG_INFO("[JIT Pass] Creating guard for this map since it is not real-only!!!");
+            spdlog::get("Morpheus")->debug("[JIT Pass] Creating guard for this map since it is not real-only!!!");
             createGuardForTable(ctx_, *table, bb->getTerminator(), OptBB, Default);
           }
 
@@ -414,10 +408,10 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
             topEntries = getEntriesFromInstrumentedMap(table->fd, table->max_entries);
 
             if (topEntries.empty()) {
-              LOG_DEBUG("No runtime entries found in the instrumented map for map: %s", table->name.c_str());
+              spdlog::get("Morpheus")->trace("No runtime entries found in the instrumented map for map: {}", table->name);
               goto createPhi;
             } else {
-              LOG_DEBUG("Found %ld TOP Entries", topEntries.size());
+              spdlog::get("Morpheus")->debug("Found {} TOP Entries", topEntries.size());
             }
 
             for (auto &topKey : topEntries) {
@@ -432,7 +426,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
                   // Try to lookup the value in the map with the one included in the instrumented
                   // map. This is possible if in the LPM we store a value that is less specific
                   // than the one used to perform the lookup
-                  LOG_DEBUG("[JIT Pass] Top entry not found in the values. Try to lookup in the map");
+                  spdlog::get("Morpheus")->debug("[JIT Pass] Top entry not found in the values. Try to lookup in the map");
                   std::string map_value;
                   ebpf::StatusTuple res(-1);
                   if (is_map_in_map_lookup && nested_map_fds.size() > 0) {
@@ -446,7 +440,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
                     res = genericTable.get_value(topKey, map_value);
                   }
                   if (res.code() != 0) {
-                    LOG_DEBUG("[JIT Pass] Map does not contain a value for key: %s", topKey.c_str());
+                    spdlog::get("Morpheus")->trace("[JIT Pass] Map does not contain a value for key: {}", topKey);
                     map_value.erase();
                     entry = std::make_pair(topKey, map_value);
                   } else {
@@ -456,8 +450,8 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
                 entry = *it;
               }
 
-              LOG_DEBUG("[JIT Pass] Top entry key from map: %s", entry.first.c_str());
-              LOG_DEBUG("[JIT Pass] Top entry leaf from map: %s", entry.second.c_str());
+              spdlog::get("Morpheus")->trace("[JIT Pass] Top entry key from map: {}", entry.first);
+              spdlog::get("Morpheus")->trace("[JIT Pass] Top entry leaf from map: {}", entry.second);
 
               auto key_constant = getKeyConstantValue(ctx_, key_struct_desc, table->key_size, entry.first);
               auto final_value = createCaseBlockForEntry(bb->getContext(), bb->getParent(), Tail, table->name,
@@ -487,8 +481,8 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
             if (std::find(topEntries.begin(), topEntries.end(), entry.first) != topEntries.end())
               continue;
 
-            LOG_DEBUG("[JIT Pass] Key from map: %s", entry.first.c_str());
-            LOG_DEBUG("[JIT Pass] Leaf from map: %s", entry.second.c_str());
+            spdlog::get("Morpheus")->trace("[JIT Pass] Key from map: {}", entry.first);
+            spdlog::get("Morpheus")->trace("[JIT Pass] Leaf from map: {}", entry.second);
 
             auto key_constant = getKeyConstantValue(ctx_, key_struct_desc, table->key_size, entry.first);
             auto final_value = createCaseBlockForEntry(bb->getContext(), bb->getParent(), Tail, table->name,
@@ -502,20 +496,6 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
             num_cases++;
             offloaded_entries_list_.push_back(entry.first);
           }
-
-          // Do not inline this function "manually". Let the compiler do it for us
-          // Otherwise strange things can happen that I do not even understand.
-          // auto inlined_func = dyn_cast<CallInst>(key_value);
-          // if (inlined_func != nullptr) {
-          //   InlineFunctionInfo ifi;
-          //   #if LLVM_VERSION_MAJOR >= 11
-          //   auto result = InlineFunction(*inlined_func, ifi);
-          //   LOG_IF_ERROR(!result.isSuccess(), "[JIT Pass] Unable to inline function: %s", result.getFailureReason());
-          //   #else
-          //   auto result = InlineFunction(inlined_func, ifi);
-          //   LOG_IF_ERROR(!result, "[JIT Pass] Unable to inline function: %s", std::string(result).c_str());
-          //   #endif
-          // }
         }
 
 createPhi:
@@ -527,11 +507,7 @@ createPhi:
         helperInstruction->setMetadata("opt.hasBeenProcessed", N);
 
         if (values.size() <= CaseValues.size() && table->is_read_only && dynamic_opt_compiler.isMapROAcrossModules(table->fd) && table->type != BPF_MAP_TYPE_LPM_TRIE) {
-          LOG_DEBUG("Performing DCE for this table, since the entries are small.");
-          // if (switchInst != nullptr) {
-          //   LOG_DEBUG("[JIT Pass] Removing helper from default instr in switch");
-          //   switchInst->setDefaultDest(Tail);
-          // }
+          spdlog::get("Morpheus")->info("Performing DCE for this table, since the entries are small.");
           /*
             * This is for the dead code elimination.
             * I remove all the instructions (that are already dead)
@@ -560,7 +536,7 @@ createPhi:
         bb = Tail->getIterator();
         instruction = bb->begin();
       } else {
-        LOG_INFO("[JIT Pass] This type of map is currently not supported");
+        spdlog::get("Morpheus")->debug("[JIT Pass] This type of map is currently not supported");
       }
     }
   }
@@ -572,7 +548,7 @@ createPhi:
 }
 
 std::vector<std::string> JITTableRuntimePass::getEntriesFromInstrumentedMap(int originalMapFd, uint max_entries) {
-  LOG_DEBUG("[JIT Pass] getEntriesFromInstrumentedMap called with fd: %d", originalMapFd);
+  spdlog::get("Morpheus")->trace("[JIT Pass] getEntriesFromInstrumentedMap called with fd: {}", originalMapFd);
 
   if (original_maps_to_instrumented_maps_.find(originalMapFd) == original_maps_to_instrumented_maps_.end())
     return std::vector<std::string>();
@@ -601,23 +577,23 @@ std::vector<std::string> JITTableRuntimePass::getEntriesFromInstrumentedMap(int 
     std::vector<std::pair<std::string, std::vector<std::string>>> values;
 
     int instrumented_map_fd = instMapDesc.fd;
-    LOG_DEBUG("[JIT Pass] getEntriesFromInstrumentedMap: Reading values from instrumented map %d", instrumented_map_fd);
+    spdlog::get("Morpheus")->trace("[JIT Pass] getEntriesFromInstrumentedMap: Reading values from instrumented map {}", instrumented_map_fd);
 
     StatusTuple rc = table.get_table_offline_percpu(values);
     if (rc.code() != 0) {
-      LOG_ERROR("Error while reading instrumented map: %s", rc.msg().c_str());
+      spdlog::get("Morpheus")->error("Error while reading instrumented map: {}", rc.msg());
     }
 
     if (values.size() == 0) {
-      LOG_DEBUG("[JIT Pass] getEntriesFromInstrumentedMap: Got empty map from instrumented values");
+      spdlog::get("Morpheus")->trace("[JIT Pass] getEntriesFromInstrumentedMap: Got empty map from instrumented values");
     } else {
-      LOG_DEBUG("[JIT Pass] getEntriesFromInstrumentedMap: Got %ld instrumented values", values.size());
+      spdlog::get("Morpheus")->trace("[JIT Pass] getEntriesFromInstrumentedMap: Got {} instrumented values", values.size());
     }
 
     // entries = dyn_opt::utils::getTopEntriesFromInstrumentedEntriesPerCPU(values, max_entries);
     entries = dyn_opt::utils::getTopEntriesFromInstrumentedEntries(values, max_entries);
   } else {
-    LOG_DEBUG("[JIT Pass] Unsupported instrumented map. Skipping!");
+    spdlog::get("Morpheus")->trace("[JIT Pass] Unsupported instrumented map. Skipping!");
     return std::vector<std::string>();
   }
 
@@ -643,8 +619,7 @@ BasicBlock *JITTableRuntimePass::createGuardForTable(llvm::LLVMContext &context,
   struct bpf_map_info info = {};
   uint32_t info_len = sizeof(info);
   bpf_obj_get_info(guard_fd, &info, &info_len);
-  LOG_INFO("[JIT Pass] Guard for table: %s has been created with fd: %d/%d", table.name.c_str(), guard_fd,
-            info.id);
+  spdlog::get("Morpheus")->debug("[JIT Pass] Guard for table: {} has been created with fd: {}/{}", table.name, guard_fd, info.id);
 
   auto guard_table = BPFPercpuArrayTable<uint64_t>(original_maps_to_guards_[table.fd]);
   std::vector<uint64_t> guard_map_value(BPFTable::get_possible_cpu_count(), 0);
@@ -711,8 +686,7 @@ int JITTableRuntimePass::createGuardMap(TableDesc &original_map) {
 
   fd = bcc_create_map_xattr(&attr, true);
   if (fd < 0) {
-    fprintf(stderr, "could not open bpf map: %s, error: %s\n",
-            map_name, strerror(errno));
+    spdlog::get("Morpheus")->error("could not open bpf map: {}, error: {}", map_name, strerror(errno));
     return -1;
   }
 
@@ -763,14 +737,6 @@ AllocaInst *JITTableRuntimePass::createAllocaForStructLeafValues(LLVMContext &ct
 
   auto final_str_name = "struct." + struct_name;
 
-  // for (auto type : mainFunction.getParent()->getIdentifiedStructTypes()) {
-  //   if (type->getName() == final_str_name) {
-  //     LOG_DEBUG("Found struct definition in LLVM Module");
-  //     struct_type = type;
-  //     break;
-  //   }
-  // }
-
   if (struct_type == nullptr) {
     struct_type = StructType::create(ctx, struct_name);
     std::vector<Type *> members;
@@ -814,20 +780,6 @@ bool JITTableRuntimePass::isSimpleKey(std::string &keyDesc) {
   // keys that are made of a struct of elements
   return !key.is_array();
 }
-
-// std::tuple<bool, std::string> JITTableRuntimePass::parseUnionKeyType(nlohmann::json &unionDesc) {
-//   assert(unionDesc.is_array() && "Unexpected format in the union key type!");
-//   bool is_array = false;
-
-//   for (unsigned int i = 0; i < unionDesc.size(); i++) {
-//     std::string value_name = unionDesc[i][0];
-//     std::string value_type = unionDesc[i][1];
-//     if (unionDesc[i].size() == 3 && unionDesc[i][2].is_array()) {
-
-//     }
-      
-//   }
-// }
 
 llvm::ConstantInt *
 JITTableRuntimePass::getKeyConstantValue(LLVMContext &ctx, nlohmann::json &keyDesc, size_t &keySize,
@@ -982,7 +934,7 @@ JITTableRuntimePass::getKeyConstantValue(LLVMContext &ctx, nlohmann::json &keyDe
 
     // TODO: Check if there is a collision in the hash of the offloaded entries.
     key = jhash_bytes((void *) key_array, keySize, JHASH_INITVAL);
-    LOG_DEBUG("[JIT Pass] Calculated jhash with value: %u", key);
+    spdlog::get("Morpheus")->trace("[JIT Pass] Calculated jhash with value: {}", key);
     key_type = IntegerType::getInt32Ty(ctx);
   }
 
@@ -1012,11 +964,11 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
     auto map_fd = bpf_map_get_fd_by_id(map_id);
 
     if (map_fd < 0) {
-      LOG_ERROR("[JITTableRuntimePass] Error while retrieving map fd for array of maps");
+      spdlog::get("Morpheus")->error("[JITTableRuntimePass] Error while retrieving map fd for array of maps");
       assert(false && "Runtime error while retrieving map fd");
     }
 
-    LOG_DEBUG("[JITTableRuntimePass] Dealing with Array of Maps. Map entry value is: %ld, and fd is: %d", map_id, map_fd);
+    spdlog::get("Morpheus")->trace("[JITTableRuntimePass] Dealing with Array of Maps. Map entry value is: {}, and fd is: {}", map_id, map_fd);
 
     auto map_fd_value = IRBCase.CreateBpfPseudoCall(map_fd);
     //auto value_ptr = CreateIntToPtr(getInt64(0), getInt8PtrTy());
@@ -1029,14 +981,14 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
   std::string value_copy = value.second;
   value_copy.erase(std::remove(value_copy.begin(), value_copy.end(), '"'), value_copy.end());
   if (value.second.empty() || value_copy.empty()) {
-    LOG_DEBUG("[JITTableRuntimePass] Setting value pointer to NULL for entry: %s", value.first.c_str());
+    spdlog::get("Morpheus")->trace("[JITTableRuntimePass] Setting value pointer to NULL for entry: {}", value.first);
     // Table for that key is empty
     final_value = ConstantPointerNull::get(llvm::Type::getInt8PtrTy(ctx));
   } else {
     if (structDesc.is_array()) {
       // The leaf is a struct
       std::string tmp_string = getJsonFromLeafValues(value.second);
-      LOG_DEBUG("[JITTableRuntimePass] The string returned from getJsonFromLeafValues is: %s", tmp_string.c_str());
+      spdlog::get("Morpheus")->trace("[JITTableRuntimePass] The string returned from getJsonFromLeafValues is: {}", tmp_string);
       auto leaf_value = nlohmann::json::parse(getJsonFromLeafValues(value.second));
       assert(leaf_value.is_array() && "Unexpected format in the leaf values!");
 
@@ -1051,11 +1003,9 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
         std::string value_name = structDesc[i][0];
         std::string value_type = structDesc[i][1];
 
-        // LOG_DEBUG("[JITTableRuntimePass] Handling %s value name with type %s", value_name.c_str(), value_type.c_str());
-
         if (value_name.find("__pad") != std::string::npos ||
             value_type.find("bpf_spin_lock") != std::string::npos) {
-            LOG_DEBUG("Skip this entry, it is just padding or a bpf_spin_lock");
+            spdlog::get("Morpheus")->trace("Skip this entry, it is just padding or a bpf_spin_lock");
             continue;
         }
 
@@ -1066,7 +1016,7 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
         auto gep_value = IRBCase.CreateStructGEP(allocaStruct, i, value_name);
 
         if (structDesc[i].size() == 3 && structDesc[i][2].is_array()) {
-          LOG_DEBUG("[JITTableRuntimePass] We are inside an array");
+          spdlog::get("Morpheus")->trace("[JITTableRuntimePass] We are inside an array");
           // We have an array in this case as an entry in the struct
           //unsigned int array_size = structDesc[i][2][0];
           std::vector<Constant *> vect;
@@ -1082,8 +1032,7 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
             std::string original_string = leaf_value[j].get<std::string>();
             string_to_offload.replace(0, original_string.length(), original_string);
             // We have a string to allocate
-            LOG_DEBUG("[JITTableRuntimePass] We need to allocate a string of size %ld in this case: %s", string_to_offload.length(), string_to_offload.c_str());
-            // auto string_ptr = IRBCase.CreateGlobalString(StringRef(string_to_offload.c_str(), string_size-1));
+            spdlog::get("Morpheus")->trace("[JITTableRuntimePass] We need to allocate a string of size {} in this case: {}", string_to_offload.length(), string_to_offload);
 
             std::vector<llvm::Constant *> chars(string_to_offload.size());
             for(unsigned int i = 0; i < string_to_offload.size(); i++) {

@@ -25,6 +25,7 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <spdlog/spdlog.h>
 
 #include "BPFTable.h"
 #include "bcc_exception.h"
@@ -64,10 +65,10 @@ class BPF {
                                   other == nullptr ? "" : other->bpf_module_->id())) {
           
     if (dynamic_opt_enabled_) {
-      LOG_INFO("[BPF] Enabling dynamic optimization");
+      auto &dynamic_compiler = MorpheusCompiler::getInstance();
+      dynamic_compiler.logger->info("[BPF] Enabling Morpheus optimizations");
       quit_thread_ = false;
       opt_ready_ = false;
-      ///optimization_thread_ = std::thread(&BPF::optimization_thread_main, this);
       if (dynamic_opt_callback) {
         dynamic_opt_callback_ = std::forward<std::function<bool(int)>>(dynamic_opt_callback);
       }

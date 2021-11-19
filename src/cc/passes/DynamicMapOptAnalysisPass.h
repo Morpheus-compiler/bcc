@@ -25,41 +25,40 @@
 #pragma once
 
 namespace ebpf {
+class DynamicMapOptAnalysisPass : public llvm::FunctionPass {
+public:
+    DynamicMapOptAnalysisPass(std::string id, std::string func_name, TableStorage *ts, fake_fd_map_def &fake_fd_map,
+                                std::vector<TableDesc *> &tables);
+    ~DynamicMapOptAnalysisPass() override;
 
-    class DynamicMapOptAnalysisPass : public llvm::FunctionPass {
-    public:
-        DynamicMapOptAnalysisPass(std::string id, std::string func_name, TableStorage *ts, fake_fd_map_def &fake_fd_map,
-                                  std::vector<TableDesc *> &tables);
-        ~DynamicMapOptAnalysisPass() override;
+    bool runOnFunction(llvm::Function &pfn) override;
+    void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
+    static llvm::Pass *createDynamicMapOptAnalysisPass(std::string id, std::string func_name, TableStorage *ts,
+                                                        fake_fd_map_def &fake_fd_map,
+                                                        std::vector<TableDesc *> &tables);
 
-        bool runOnFunction(llvm::Function &pfn) override;
-        void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
-        static llvm::Pass *createDynamicMapOptAnalysisPass(std::string id, std::string func_name, TableStorage *ts,
-                                                           fake_fd_map_def &fake_fd_map,
-                                                           std::vector<TableDesc *> &tables);
+    void findAssociatedArrayOfMaps(llvm::LLVMContext &ctx, llvm::CallInst &instruction, llvm::AliasAnalysis &AA,
+                                    llvm::MemorySSA &MSSA, std::vector<std::pair<llvm::CallInst *, ebpf::TableDesc *>> &array_of_maps); 
 
-        void findAssociatedArrayOfMaps(llvm::LLVMContext &ctx, llvm::CallInst &instruction, llvm::AliasAnalysis &AA,
-                                       llvm::MemorySSA &MSSA, std::vector<std::pair<llvm::CallInst *, ebpf::TableDesc *>> &array_of_maps); 
+    // The address of this static is used to uniquely identify this pass in the
+    // pass registry. The PassManager relies on this address to find instance of
+    // analyses passes and build dependencies on demand.
+    // The value does not matter.
+    static char ID;
 
-        // The address of this static is used to uniquely identify this pass in the
-        // pass registry. The PassManager relies on this address to find instance of
-        // analyses passes and build dependencies on demand.
-        // The value does not matter.
-        static char ID;
+private:
+    std::string bpf_module_id_;
+    std::string func_name_;
+    ebpf::TableStorage *ts_{};
+    ebpf::fake_fd_map_def &fake_fd_map_;
+    std::vector<ebpf::TableDesc *> &tables_;
+    bool has_array_of_maps_;
+    std::vector<std::pair<llvm::CallInst *, ebpf::TableDesc *>> per_cpu_map_values_array;
 
-    private:
-        std::string bpf_module_id_;
-        std::string func_name_;
-        ebpf::TableStorage *ts_{};
-        ebpf::fake_fd_map_def &fake_fd_map_;
-        std::vector<ebpf::TableDesc *> &tables_;
-        bool has_array_of_maps_;
-        std::vector<std::pair<llvm::CallInst *, ebpf::TableDesc *>> per_cpu_map_values_array;
-
-        static bool helperInstructionCanBeOptimized(llvm::Function &F, llvm::AliasAnalysis &AA, llvm::MemorySSA &MSSA,
-                                             llvm::CallInst *helperInstruction);
-        bool mapIsReadOnly(llvm::Function &F, llvm::AliasAnalysis &AA, llvm::MemorySSA &MSSA,
-                                         llvm::CallInst &mapLookupInstruction);
-    };
+    static bool helperInstructionCanBeOptimized(llvm::Function &F, llvm::AliasAnalysis &AA, llvm::MemorySSA &MSSA,
+                                            llvm::CallInst *helperInstruction);
+    bool mapIsReadOnly(llvm::Function &F, llvm::AliasAnalysis &AA, llvm::MemorySSA &MSSA,
+                                        llvm::CallInst &mapLookupInstruction);
+};
 
 }

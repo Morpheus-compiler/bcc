@@ -71,7 +71,7 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
       if (MDNode *N = helperInstruction->getMetadata("opt.hasBeenInstrumented")) {
         auto processed = cast<MDString>(N->getOperand(0))->getString();
         if (processed.contains("true")) {
-          LOG_DEBUG("[utils] Instruction already instrumented. Skipping!");
+          spdlog::get("Morpheus")->trace("[utils] Instruction already instrumented. Skipping!");
           continue;
         }
       }
@@ -85,7 +85,7 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
         map_in_map_fd = dyn_opt::utils::getMapInMapFDFromDebugInfo(*helperInstruction);
         if (map_in_map_fd > 0) {
           is_map_in_map_lookup = true;
-          LOG_DEBUG("[BPFInstr Pass] This lookup is referring to a BPF_MAP_IN_MAP with fd: %d", map_in_map_fd);
+          spdlog::get("Morpheus")->trace("[BPFInstr Pass] This lookup is referring to a BPF_MAP_IN_MAP with fd: {}", map_in_map_fd);
           bpfPseudoCallInst = helperInstruction;
         } else {
           continue;
@@ -105,11 +105,10 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
         continue;
 
       if (!dyn_opt::utils::mapCanBeInstrumented(table)) {
-        LOG_INFO("[BPFInstr Pass] Skipping map: %s since it cannot be instrumented", table->name.c_str());
+        spdlog::get("Morpheus")->debug("[BPFInstr Pass] Skipping map: {} since it cannot be instrumented", table->name);
         continue;
       } else if (table->max_entries <= dynamic_opt_compiler.getMaxOffloadedEntries() && table->type != BPF_MAP_TYPE_LPM_TRIE && INSTRUMENT_EVERYTHING == 0) {
-        LOG_INFO("[BPFInstr Pass] No need to instrument map: %s. All entries can be offloaded (max_size <= MAX_OFFLOADED_ENTRIES)",
-                table->name.c_str());
+        spdlog::get("Morpheus")->debug("[BPFInstr Pass] No need to instrument map: {}. All entries can be offloaded (max_size <= MAX_OFFLOADED_ENTRIES)", table->name);
         continue;
       }
       
@@ -123,14 +122,13 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
       }
 
       if (values.size() <= dynamic_opt_compiler.getMaxOffloadedEntries() && table->type != BPF_MAP_TYPE_LPM_TRIE && INSTRUMENT_EVERYTHING == 0) {
-        LOG_INFO("[BPFInstr Pass] No need to instrument map: %s. All entries can be offloaded (runtime_size <= MAX_OFFLOADED_ENTRIES)",
-                 table->name.c_str());
+        spdlog::get("Morpheus")->debug("[BPFInstr Pass] No need to instrument map: {}. All entries can be offloaded (runtime_size <= MAX_OFFLOADED_ENTRIES)",
+                 table->name);
         continue;
       }
 
-      LOG_INFO("[BPFInstr Pass] Instrumenting map: %s (fd: %d), type: %s",
-                table->name.c_str(), (int) table->fd,
-                dyn_opt::utils::table_type_id_to_string_name(table->type).c_str());
+      spdlog::get("Morpheus")->debug("[BPFInstr Pass] Instrumenting map: {0} (fd: {1}), type: {2}", table->name, (int) table->fd,
+                dyn_opt::utils::table_type_id_to_string_name(table->type));
 
       // First of all, let's create the ancillary per-CPU map equivalent to the normal map that we
       // are going to instrument and let's
@@ -141,8 +139,8 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
       struct bpf_map_info info = {};
       uint32_t info_len = sizeof(info);
       bpf_obj_get_info(inst_fd, &info, &info_len);
-      LOG_DEBUG("[BPFInstr Pass] Instrumented map for original map: %s has been created with fd: %d, and id: %d",
-                table->name.c_str(), inst_fd, info.id);
+      spdlog::get("Morpheus")->info("[BPFInstr Pass] Instrumented map for original map: {0} has been created with fd: {1}, and id: {2}",
+                table->name, inst_fd, info.id);
 
       // Now that we have the instrumented map, we should create the corresponding call to update the value
       // of the map
@@ -154,7 +152,6 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
         uint64_t percentage = std::stoul(std::to_string(DYN_COMPILER_INSTRUMENTATION_PERCENTAGE));
         uint64_t max = std::numeric_limits<uint32_t>::max();
         uint64_t max_range = (max * percentage) / 100;
-        //LOG_INFO("[BPFInstr Pass] Using %u as max range for instrumentation", max_range);
 
         createLookupAndUpdateValue(instrumented_map, helperInstruction, bb->getTerminator(), Default, max_range);
       } else {
@@ -173,7 +170,7 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
       bb = Default->getIterator();
       instruction = bb->begin();
 
-      LOG_DEBUG("[BPFInstr Pass] Instrumentation completed for map: %s", table->name.c_str());
+      spdlog::get("Morpheus")->info("[BPFInstr Pass] Instrumentation completed for map: {}", table->name);
     }
   }
 
@@ -216,9 +213,6 @@ void BPFMapInstrumentationPass::createLookupAndUpdateValue(TableDesc &instrument
 
   builder.CreateAtomicRMW(AtomicRMWInst::BinOp::Add, res_value, builder.getInt64(1),
                           AtomicOrdering::SequentiallyConsistent);
-  
-  // auto value = builder.CreateLoad(builder.getInt64Ty(), res_value);
-  // builder.CreateStore(builder.CreateAdd(value, builder.getInt64(1)), res_value);
 
   builder.CreateBr(defaultBlock);
 }
@@ -271,13 +265,7 @@ int BPFMapInstrumentationPass::createInstrumentedMap(TableDesc &original_map) {
     max_entries = dynamic_opt_compiler.getMaxOffloadedEntries()*100;
   } else {
     max_entries = 50*100;
-    // max_entries = original_map.max_entries;
   }
-//      max_entries = dynamic_opt_compiler.getMaxOffloadedEntries();
-
-  // I will copy the same flags as the original maps
-  //map_flags = original_map.flags;
-  //map_flags = BPF_F_NO_COMMON_LRU;
 
   struct bpf_create_map_attr attr = {};
   attr.map_type = (enum bpf_map_type) map_type;
@@ -289,8 +277,7 @@ int BPFMapInstrumentationPass::createInstrumentedMap(TableDesc &original_map) {
 
   fd = bcc_create_map_xattr(&attr, true);
   if (fd < 0) {
-    fprintf(stderr, "could not open bpf map: %s, error: %s\n",
-            map_name, strerror(errno));
+    spdlog::get("Morpheus")->error("could not open bpf map: {}, error: {}", map_name, strerror(errno));
     return -1;
   }
 

@@ -135,8 +135,7 @@ StatusTuple BPF::init(const std::string& bpf_program,
   if (dynamic_opt_enabled_) {
     // Create the dynamic compiler instance
     auto &dynamic_compiler = MorpheusCompiler::getInstance();
-
-    LOG_INFO("[BPF] MorpheusCompiler instance created. Spawn optimization thread");
+    dynamic_compiler.logger->info("[BPF] Morpheus instance created. Spawn optimization thread");
 
     // Create the main dynamic optimization thread
     optimization_thread_ = std::thread(&BPF::optimization_thread_main, this);
@@ -168,9 +167,10 @@ void BPF::optimization_thread_main() {
     std::this_thread::sleep_for(std::chrono::seconds(DYNAMIC_OPTIMIZER_TIMEOUT_STEPS));
     i+=DYNAMIC_OPTIMIZER_TIMEOUT_STEPS;
 
-    // LOG_DEBUG("[BPF] Passed: %d, Name: %s, Type: %s", i, dynamic_opt_func_name_.c_str(),
-    //           std::to_string(dynamic_opt_prog_type_).c_str());
-    if (i >= DYNAMIC_OPTIMIZER_TIMEOUT && !dynamic_opt_func_name_.empty() && ebpf::MorpheusCompiler::getInstance().dynamicCompilerEnabled()) {
+    auto &dynamic_compiler = MorpheusCompiler::getInstance();
+    dynamic_compiler.logger->trace("[BPF] Passed: {0}, Name: {1}, Type: {2}", i, dynamic_opt_func_name_, std::to_string(dynamic_opt_prog_type_));
+
+    if (i >= DYNAMIC_OPTIMIZER_TIMEOUT && !dynamic_opt_func_name_.empty() && dynamic_compiler.dynamicCompilerEnabled()) {
       std::lock_guard<std::mutex> opt_guard(opt_mutex_);
       i = 0;
       // This is the optimization toolchain
@@ -178,13 +178,13 @@ void BPF::optimization_thread_main() {
       auto compiler_start = std::chrono::high_resolution_clock::now();
       if (bpf_module_->run_dynamic_opt_pass_manager(dynamic_opt_func_name_) == BPFModule::NO_MODULE_CHANGES) {
         // No changes have been applied to the current module, skip it!
-        LOG_INFO("No changes detected to the current module. Skipping reloading!");
+        dynamic_compiler.logger->trace("[BPF] No changes detected to the current module. Skipping reloading!");
         continue;
       }
       // Record end time
       auto compiler_finish = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double, std::milli> compiler_elapsed = compiler_finish - compiler_start;
-      std::cout << "[Morpheus] Time to execute entire compiler pipeline: " << compiler_elapsed.count() << " ms\n";
+      dynamic_compiler.logger->info("[BPF] Time to execute entire compiler pipeline: {} ms", compiler_elapsed.count());
 
       int new_fd = -1, old_fd = -1;
       if (funcs_.find(dynamic_opt_func_name_) != funcs_.end()) {
@@ -196,19 +196,18 @@ void BPF::optimization_thread_main() {
       auto load_res = load_func(dynamic_opt_func_name_, dynamic_opt_prog_type_, new_fd, true);
       auto load_end = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double, std::milli> load_elapsed = load_end - load_start;
-      std::cout << "[Morpheus] Time to load eBPF program in kernel: " << load_elapsed.count() << " ms\n";
+      dynamic_compiler.logger->info("[BPF] Time to load eBPF program in kernel: {} ms", load_elapsed.count());
 
       if (load_res.code() != 0) {
         // logger->error("failed to load XDP program: {0}", load_res.msg());
-        LOG_ERROR("[BPF] Failed to load program: %s", load_res.msg().c_str());
-        LOG_ERROR("[BPF] Name: %s, Type: %s", dynamic_opt_func_name_.c_str(),
-                  std::to_string(dynamic_opt_prog_type_).c_str());
+        dynamic_compiler.logger->error("[BPF] Failed to load program: {}", load_res.msg());
+        dynamic_compiler.logger->error("[BPF] Name: {0}, Type: {1}", dynamic_opt_func_name_, std::to_string(dynamic_opt_prog_type_));
         // TODO: We should send a notification to the main thread to stop the execution
         quit_thread_ = true;
         assert(false && "Failed to load the program. Cannot continue!");
         //throw BPFError("Failed to load XDP program: " + load_res.msg());
       } else {
-        LOG_INFO("[BPF] New optimized code re-loaded");
+        dynamic_compiler.logger->info("[BPF] New optimized code re-loaded");
 
         if (DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
           auto &dynamic_compiler = MorpheusCompiler::getInstance();
@@ -218,9 +217,8 @@ void BPF::optimization_thread_main() {
         if (dynamic_opt_callback_ && dynamic_opt_callback_(new_fd)) {
           auto res = unload_func(old_fd);
           if (res.code() != 0) {
-            LOG_ERROR("[BPF] Failed to Unload program: %s\n", load_res.msg().c_str());
-            LOG_ERROR("[BPF] Name: %s, Type: %s\n", dynamic_opt_func_name_.c_str(),
-                      std::to_string(dynamic_opt_prog_type_).c_str());
+            dynamic_compiler.logger->error("[BPF] Failed to Unload program: {}", load_res.msg());
+            dynamic_compiler.logger->error("[BPF] Name: {0}, Type: {1}", dynamic_opt_func_name_, std::to_string(dynamic_opt_prog_type_));
           }
         }
       }
@@ -241,15 +239,15 @@ void BPF::enable_morpheus() {
 BPF::~BPF() {
     if (dynamic_opt_enabled_) {
       std::lock_guard<std::mutex> opt_guard(opt_mutex_);
+      auto &dynamic_compiler = MorpheusCompiler::getInstance();
       if (DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
-        auto &dynamic_compiler = MorpheusCompiler::getInstance();
         dynamic_compiler.unregisterCallback(dynamic_callback_id_);
       }
 
       quit_thread_ = true;
       cv_enable_opt.notify_all();
       optimization_thread_.join();
-      LOG_DEBUG("[BPF] All Morpheus threads terminated successfully");
+      dynamic_compiler.logger->debug("[BPF] All Morpheus threads terminated successfully");
     }
 
     auto res = detach_all();

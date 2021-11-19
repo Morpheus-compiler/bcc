@@ -25,6 +25,8 @@
 #include <functional>
 #include <random>
 #include <map>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_sinks.h>
 
 // This flag is use to enable or disable the runtime optimization.
 // If set to 0 no optimization is applied to the programs.
@@ -148,6 +150,8 @@ namespace ebpf {
         void setDynamicCompiler(bool enable);
         void addOrUpdateMapInfo(int map_fd, struct MapInfo info);
         bool isMapROAcrossModules(int map_fd);
+
+        std::shared_ptr<spdlog::logger> logger;
     private:
         MorpheusCompiler();
         ~MorpheusCompiler();
@@ -158,6 +162,7 @@ namespace ebpf {
         void update_bpf_map(int fd);
         void add_entries_to_bpf_map(const std::map<int, TableDesc> *pMap);
         void remove_entries_from_bpf_map(const std::map<int, TableDesc> *pMap);
+        void initlogger();
     private:
         std::mutex dyn_mutex;
         std::unique_ptr<ebpf::BPF> trace_guard_prog;
@@ -169,6 +174,7 @@ namespace ebpf {
         std::map<int, struct MapInfo> map_info_;
         unsigned int max_offloaded_entries_;
         bool dynamic_compiler_enabled_;
+        std::shared_ptr<spdlog::sinks::ansicolor_stdout_sink_mt> console;
 
         std::map<int, callbackFunc> callback_functions_;
 

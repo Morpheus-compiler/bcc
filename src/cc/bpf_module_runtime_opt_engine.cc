@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2019 Politecnico di Torino
+ * Copyright (c) 2021 Morpheus Authors
  *
- * Author: Sebastiano Miano <sebastiano.miano@polito.it>
+ * Author: Sebastiano Miano <mianosebastiano@gmail.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "common.h"
 #include "bpf_module.h"
 #include "table_storage.h"
@@ -50,6 +51,8 @@
 #include <llvm-c/Core.h>
 #include <cc/passes/utils.h>
 
+#include <spdlog/spdlog.h>
+
 #include "passes/JITTableRuntimePass.h"
 #include "passes/DynamicMapOptAnalysisPass.h"
 #include "passes/BPFMapInstrumentationPass.h"
@@ -69,9 +72,9 @@ namespace ebpf {
     const int BPFModule::NO_MODULE_CHANGES;
 
     int BPFModule::run_dynamic_opt_pass_manager(const std::string &func_name) {
-      LOG_DEBUG("[bpf_module] Running dynamic optimization pass manager");
+      spdlog::get("Morpheus")->trace("[bpf_module] Running dynamic optimization pass manager");
       if (mod_original_ == nullptr) {
-        LOG_ERROR("[bpf_module] Error while accessing module at runtime");
+        spdlog::get("Morpheus")->error("[bpf_module] Error while accessing module at runtime");
         return -1;
       }
 
@@ -93,7 +96,7 @@ namespace ebpf {
         current_func = engine_->FindFunctionNamed(func_name);
 
         if (!current_func) {
-          LOG_ERROR("[bpf_module] I was not able to get function pointer");
+          spdlog::get("Morpheus")->error("[bpf_module] I was not able to get function pointer");
           return -1;
         }
 
@@ -134,34 +137,26 @@ namespace ebpf {
         // Record end time
         auto compiler_finish = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> compiler_elapsed = compiler_finish - compiler_start;
-        std::cout << "[Morpheus] Time to execute run_dyn_pass_manager: " << compiler_elapsed.count() << " ms\n";
+        spdlog::get("Morpheus")->info("[bpf_module]Time to execute run_dyn_pass_manager: {} ms", compiler_elapsed.count());
 
         compiler_start = std::chrono::high_resolution_clock::now();
         int final_res = finalize_runtime_module();
         compiler_finish = std::chrono::high_resolution_clock::now();
         compiler_elapsed = compiler_finish - compiler_start;
-        std::cout << "[Morpheus] Time to execute finalize_runtime_module: " << compiler_elapsed.count() << " ms\n";
+        spdlog::get("Morpheus")->info("[bpf_module]Time to execute finalize_runtime_module: {} ms", compiler_elapsed.count());
 
         Function *new_func = engine_->FindFunctionNamed(func_name);
-//        GlobalNumberState globalState;
-//        auto func_comparator = FunctionComparator(current_func, pfn, &globalState);
-//        int res = func_comparator.compare();
-
         auto hash1 = FunctionComparator::functionHash(*new_func);
         auto hash2 = FunctionComparator::functionHash(*current_func);
 
-//        pfn->print(llvm::errs());
-//        llvm::errs() << "\n\n";
-//        current_func->print(llvm::errs());
         dyn_opt_runs++;
         if ((hash1 == hash2) && (saved_offloaded_entries_ == offloaded_entries) && !ALWAYS_SWAP_PROGRAM) {
-//        if (res == 0) {
-          LOG_DEBUG("[bpf_module] No changes detected, skipping reloading");
+          spdlog::get("Morpheus")->info("[bpf_module] No changes detected, skipping reloading");
           return BPFModule::NO_MODULE_CHANGES;
         } else {
           current_func = new_func;
           saved_offloaded_entries_ = offloaded_entries;
-          LOG_DEBUG("[bpf_module] Changes detected, reloading!");
+          spdlog::get("Morpheus")->info("[bpf_module] Changes detected, reloading!");
         }
         return final_res;
       }
@@ -188,20 +183,7 @@ namespace ebpf {
       // give functions an id
       for (const auto &section : sections_)
         if (!strncmp(FN_PREFIX.c_str(), section.first.c_str(), FN_PREFIX.size()))
-          function_names_.push_back(section.first);
-
-      //dump_ir_to_file(*mod_runtime_ptr_, "optimized.bc");
-
-      // auto t = std::time(nullptr);
-      // auto tm = *std::localtime(&t);
-  
-      // {
-      //   std::ostringstream oss;
-      //   oss << std::put_time(&tm, "optimized%H-%M-%S.bc");
-      //   auto fileName = oss.str();
-      //   dump_ir_to_file(*mod_runtime_ptr_, fileName);
-      // }
-      
+          function_names_.push_back(section.first);    
       
       return 0;
     }
@@ -226,17 +208,12 @@ namespace ebpf {
           if (auto *st = dyn_cast<StructType>(pt->getElementType())) {
             if (st->getNumElements() < 2) continue;
             Type *key_type = st->elements()[0];
-//            Type *leaf_type = st->elements()[1];
-            // I know at priori that the value of the instrumented map is a uint64_t
             Type *leaf_type = Type::getInt64Ty(m->getContext());
 
             using std::placeholders::_1;
             using std::placeholders::_2;
             using std::placeholders::_3;
 
-            // if (!has_reader(key_type) || !has_reader(leaf_type) || !has_writer(key_type) || !has_writer(leaf_type)) {
-            //   create_new_module = true;
-            // }
             table.key_sscanf = std::bind(&BPFModule::sscanf_instrumentation, this,
                                          make_reader(&*m, key_type), _1, _2);
             table.leaf_sscanf = std::bind(&BPFModule::sscanf_instrumentation, this,
@@ -247,12 +224,12 @@ namespace ebpf {
                     std::bind(&BPFModule::snprintf_instrumentation, this, make_writer(&*m, leaf_type),
                               _1, _2, _3);
             int instrumented_map_fd = table.fd;
-            LOG_DEBUG("Annotating runtime module for instrumented map with fd: %d", instrumented_map_fd);
+            spdlog::get("Morpheus")->debug("Annotating runtime module for instrumented map with fd: %d", instrumented_map_fd);
           }
         }
       }
 
-      LOG_DEBUG("There is a need to re-create all readers and writers");
+      spdlog::get("Morpheus")->trace("There is a need to re-create all readers and writers");
       make_all_readers_and_writers(&*m);
       rw_instr_engine_.reset();
       rw_instr_engine_ = finalize_rw(move(m));
@@ -278,7 +255,6 @@ namespace ebpf {
       PMB.populateModulePassManager(PM);
       PM.run(mod);
 
-//      dump_ir(mod);
       if (verifyModule(mod, &errs())) {
         if (flags_ & DEBUG_LLVM_IR)
           dump_ir(mod);
@@ -329,7 +305,6 @@ namespace ebpf {
         auto res = guard_table.get_value(0, guard_map_value);
         assert(res.code() == 0 && "[BPFModule] Unable to get current value from guard map");
 
-        //uint64_t value = std::accumulate(guard_map_value.begin(), guard_map_value.end(), (uint64_t)0);
         // I take the first value since it is the same among the various CPU cores
         uint64_t value = guard_map_value[0];
         value++;
@@ -339,9 +314,9 @@ namespace ebpf {
         res = guard_table.update_value(0, new_guard_value);
         assert(res.code() == 0 && "[BPFModule] Unable to update value inside guard map");
 
-        LOG_DEBUG("Guard map with fd: %d (original: %d) updated", guard_table.fd(), map_fd);
+        spdlog::get("Morpheus")->debug("Guard map with fd: {} (original: {}) updated", guard_table.fd(), map_fd);
       } else {
-        LOG_DEBUG("Unable to find guard map associated with map: %d", map_fd);
+        spdlog::get("Morpheus")->debug("Unable to find guard map associated with map: {}", map_fd);
       }
     }
 

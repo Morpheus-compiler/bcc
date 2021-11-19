@@ -84,7 +84,7 @@ bool DynamicMapOptAnalysisPass::mapIsReadOnly(llvm::Function &F, llvm::AliasAnal
           auto &updatePseudoInt = dyn_opt::utils::getBPFPseudoTableFd(*update_pseudo)->getValue();
 
           if (lookupPseudoInt == updatePseudoInt) {
-            LOG_DEBUG("Lookup and update instruction have the same FD");
+            spdlog::get("Morpheus")->trace("Lookup and update instruction have the same FD");
             return false;
           }
         } else {
@@ -150,7 +150,7 @@ bool DynamicMapOptAnalysisPass::runOnFunction(Function &pfn) {
       }
 
       if (!helperInstructionCanBeOptimized(pfn, *AA, *MSSA, helperInstruction)) {
-        LOG_DEBUG("[AnalysisPass] Map cannot be optimized!");
+        spdlog::get("Morpheus")->trace("[AnalysisPass] Map cannot be optimized!");
 
         // Before we finish, I want to mark the current helper so that we cannot apply the
         // optimization on it.
@@ -188,7 +188,7 @@ bool DynamicMapOptAnalysisPass::runOnFunction(Function &pfn) {
           // that checks if the map_fd value of the helper instruction
           // is contained into a map_update helper call
           if (!mapIsReadOnly(pfn, *AA, *MSSA, *helperInstruction)) {
-            LOG_DEBUG("[AnalysisPass] Map with fd: %d is NOT read only! It should be guarded!", map_fd);
+            spdlog::get("Morpheus")->debug("[AnalysisPass] Map with fd: {} is NOT read only! It should be guarded!", map_fd);
             llvm::MDNode *N = llvm::MDNode::get(ctx_, MDString::get(ctx_, "false"));
             helperInstruction->setMetadata("opt.isReadOnly", N);
             table->is_read_only = false;
@@ -196,7 +196,7 @@ bool DynamicMapOptAnalysisPass::runOnFunction(Function &pfn) {
             // TODO: This can be a problem when multiple programs update this value
             dynamic_opt_compiler.addOrUpdateMapInfo(map_fd, map_info);
           } else {
-            LOG_DEBUG("[AnalysisPass] Map with fd: %d is read only! Yeah!", map_fd);
+            spdlog::get("Morpheus")->trace("[AnalysisPass] Map with fd: {} is read only! Yeah!", map_fd);
             llvm::MDNode *N = llvm::MDNode::get(ctx_, MDString::get(ctx_, "true"));
             helperInstruction->setMetadata("opt.isReadOnly", N);
             table->is_read_only = true;
