@@ -70,12 +70,12 @@ RUN mkdir -p /clang+llvm10 && \
     tar xf clang+llvm-10.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz -C clang+llvm10 --strip-components 1 && \
     rm clang+llvm-10.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
 
-# FIXME this is faster than building from source, but it seems there is a bug
-# in probing libruby.so rather than ruby binary
-#RUN apt-get update -qq && \
-#    apt-get install -y software-properties-common && \
-#    apt-add-repository ppa:brightbox/ruby-ng && \
-#    apt-get update -qq && apt-get install -y ruby2.6 ruby2.6-dev
+RUN pushd . && mkdir -p /bison-3.8 && \ 
+    wget https://mirror.easyname.at/gnu/bison/bison-3.8.tar.gz && \
+    tar -xvf bison-3.8.tar.gz -C bison-3.8 --strip-components 1 && \
+    rm bison-3.8.tar.gz && \
+    cd bison-3.8 && ./configure && make -j && make install && \
+    popd && rm -rf bison-3.8
 
 RUN wget -O ruby-install-0.7.0.tar.gz \
          https://github.com/postmodern/ruby-install/archive/v0.7.0.tar.gz && \

@@ -20,6 +20,8 @@ else()
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/libbpf/include/uapi)
 endif()
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/spdlog)
+
 # add_definitions has a problem parsing "-D_GLIBCXX_USE_CXX11_ABI=0", this is safer
 separate_arguments(LLVM_DEFINITIONS)
 add_compile_options(${LLVM_DEFINITIONS})
