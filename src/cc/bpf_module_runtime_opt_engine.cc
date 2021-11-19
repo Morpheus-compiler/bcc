@@ -190,7 +190,7 @@ namespace ebpf {
         if (!strncmp(FN_PREFIX.c_str(), section.first.c_str(), FN_PREFIX.size()))
           function_names_.push_back(section.first);
 
-      dump_ir_to_file(*mod_runtime_ptr_, "optimized.bc");
+      //dump_ir_to_file(*mod_runtime_ptr_, "optimized.bc");
 
       // auto t = std::time(nullptr);
       // auto tm = *std::localtime(&t);

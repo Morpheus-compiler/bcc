@@ -249,6 +249,7 @@ BPF::~BPF() {
       quit_thread_ = true;
       cv_enable_opt.notify_all();
       optimization_thread_.join();
+      LOG_DEBUG("[BPF] All Morpheus threads terminated successfully");
     }
 
     auto res = detach_all();
