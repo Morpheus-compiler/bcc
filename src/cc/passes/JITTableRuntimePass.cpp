@@ -527,7 +527,6 @@ createPhi:
                                 ConstantPointerNull::get(llvm::Type::getInt8PtrTy(ctx_)));
         } 
 
-        printf("\n");
         modified = true;
 
         /* Since I made some modifications on the function I update the iterator with the position of
