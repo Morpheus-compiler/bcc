@@ -139,8 +139,8 @@ StatusTuple BPF::init(const std::string& bpf_program,
 
     // Create the main dynamic optimization thread
     optimization_thread_ = std::thread(&BPF::optimization_thread_main, this);
-
-    if (DYN_COMPILER_ENABLE_GUARDS && DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+    auto &morpheus_config = MorpheusCompiler::getInstance().get_config();
+    if (morpheus_config.enable_guard && morpheus_config.enable_guards_update) {
       dynamic_callback_id_ = dynamic_compiler.registerCallback(
               std::bind(&BPF::callback_update_guard, this, std::placeholders::_1, std::placeholders::_2), bpf_module_->getRuntimeMapToGuards());
     }
@@ -154,23 +154,23 @@ StatusTuple BPF::init(const std::string& bpf_program,
 void BPF::optimization_thread_main() {
   uint16_t i = 0;
 
+  auto &dynamic_compiler = MorpheusCompiler::getInstance();
   std::unique_lock<std::mutex> lk(opt_enable_opt_mutex_);
   cv_enable_opt.wait(lk, [this]{return (opt_ready_ || quit_thread_);}); 
 
-  while (i < DYNAMIC_OPTIMIZED_TIMEOUT_INIT && !quit_thread_) {
-    std::this_thread::sleep_for(std::chrono::seconds(DYNAMIC_OPTIMIZER_TIMEOUT_STEPS));
+  while (i < dynamic_compiler.get_config().optimizer_timeout_init && !quit_thread_) {
+    std::this_thread::sleep_for(std::chrono::seconds(dynamic_compiler.get_config().optimizer_timeout_steps));
     i++;
   }
 
   i = 0;
   while (!quit_thread_) {
-    std::this_thread::sleep_for(std::chrono::seconds(DYNAMIC_OPTIMIZER_TIMEOUT_STEPS));
-    i+=DYNAMIC_OPTIMIZER_TIMEOUT_STEPS;
-
-    auto &dynamic_compiler = MorpheusCompiler::getInstance();
+    std::this_thread::sleep_for(std::chrono::seconds(dynamic_compiler.get_config().optimizer_timeout_steps));
+    i+=dynamic_compiler.get_config().optimizer_timeout_steps;
+    
     dynamic_compiler.logger->trace("[BPF] Passed: {0}, Name: {1}, Type: {2}", i, dynamic_opt_func_name_, std::to_string(dynamic_opt_prog_type_));
 
-    if (i >= DYNAMIC_OPTIMIZER_TIMEOUT && !dynamic_opt_func_name_.empty() && dynamic_compiler.dynamicCompilerEnabled()) {
+    if (i >= dynamic_compiler.get_config().optimizer_timeout && !dynamic_opt_func_name_.empty() && dynamic_compiler.dynamicCompilerEnabled()) {
       std::lock_guard<std::mutex> opt_guard(opt_mutex_);
       i = 0;
       // This is the optimization toolchain
@@ -209,7 +209,7 @@ void BPF::optimization_thread_main() {
       } else {
         dynamic_compiler.logger->info("[BPF] New optimized code re-loaded");
 
-        if (DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+        if (dynamic_compiler.get_config().enable_guards_update) {
           auto &dynamic_compiler = MorpheusCompiler::getInstance();
           dynamic_compiler.update_filtered_map_ids(dynamic_callback_id_);
         }
@@ -240,7 +240,7 @@ BPF::~BPF() {
     if (dynamic_opt_enabled_) {
       std::lock_guard<std::mutex> opt_guard(opt_mutex_);
       auto &dynamic_compiler = MorpheusCompiler::getInstance();
-      if (DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+      if (dynamic_compiler.get_config().enable_guards_update) {
         dynamic_compiler.unregisterCallback(dynamic_callback_id_);
       }
 

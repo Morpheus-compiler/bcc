@@ -185,7 +185,7 @@ BPFModule::~BPFModule() {
       v.leaf_snprintf = unimplemented_snprintf;
     }
 
-    if (DYN_COMPILER_ENABLE_INSTRUMENTATION) {
+    if (MorpheusCompiler::getInstance().get_config().enable_instrumentation) {
       cleanup_rw_instr_engine();
     }
   }

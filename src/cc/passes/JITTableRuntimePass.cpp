@@ -260,7 +260,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
         auto afterHelperInst = helperInstruction->getNextNode();
         BasicBlock *Tail = SplitBlock(afterHelperInst->getParent(), afterHelperInst);
 
-        if (DYN_OPT_DEBUG_LLVM_IR_TRACE_PRINTK) {
+        if (dynamic_opt_compiler.get_config().enable_debug_printk) {
           builder::IRBuilderBPF IRB(Default->getFirstNonPHI());
           IRB.CreateTracePrintk("Map: " + table->name + " -> Default branch hit!\n");
         }
@@ -272,7 +272,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
           spdlog::get("Morpheus")->debug("[JIT Pass] Map is empty, replacing with null value!!!");
           BasicBlock *successGuardBB;
 
-          if (DYN_COMPILER_ENABLE_GUARDS && (!table->is_read_only || !dynamic_opt_compiler.isMapROAcrossModules(table->fd))) {
+          if (dynamic_opt_compiler.get_config().enable_guard && (!table->is_read_only || !dynamic_opt_compiler.isMapROAcrossModules(table->fd))) {
             spdlog::get("Morpheus")->debug("[JIT Pass] Creating guard for this map since it is not real-only!!!");
             successGuardBB = createGuardForTable(ctx_, *table, bb->getTerminator(), Tail, Default);
             auto final_value = std::make_pair(ConstantPointerNull::get(Type::getInt8PtrTy(ctx_)), successGuardBB);
@@ -346,7 +346,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
           //   PhiInstruction(Default, CaseNBlock...)
           //   Tail
           BasicBlock *OptBB = bb->splitBasicBlock(bb->getTerminator());
-          if (DYN_COMPILER_ENABLE_GUARDS && (!table->is_read_only || !dynamic_opt_compiler.isMapROAcrossModules(table->fd))) {
+          if (dynamic_opt_compiler.get_config().enable_guard && (!table->is_read_only || !dynamic_opt_compiler.isMapROAcrossModules(table->fd))) {
             spdlog::get("Morpheus")->debug("[JIT Pass] Creating guard for this map since it is not real-only!!!");
             createGuardForTable(ctx_, *table, bb->getTerminator(), OptBB, Default);
           }
@@ -385,7 +385,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
             key_value = IRB.CreateCall(jhash_func, args);
           }
 
-          if (DYN_OPT_DEBUG_LLVM_IR_TRACE_PRINTK) {
+          if (dynamic_opt_compiler.get_config().enable_debug_printk) {
             IRB.CreateTracePrintkOneArg("Map: " + table->name + " -> Key value: %u!\n", key_value);
           }
 
@@ -633,7 +633,7 @@ BasicBlock *JITTableRuntimePass::createGuardForTable(llvm::LLVMContext &context,
   builder.CreateStore(builder.getInt32(0), alloca_key);
 
   auto guard_value = builder.CreateGuardMapLookupElem(guard_fd, Type::getInt64Ty(context), alloca_key, ifFalse,
-                                                      DYN_OPT_DEBUG_LLVM_IR_TRACE_PRINTK);
+                                                      MorpheusCompiler::getInstance().get_config().enable_debug_printk);
   auto guard_cmp_res = builder.CreateICmpEQ(guard_value, builder.getInt64(guard_map_value[0]));
 
   builder.CreateCondBr(guard_cmp_res, IfTrue, ifFalse);
@@ -953,7 +953,7 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
   builder::IRBuilderBPF IRBCase(branchInst);
   Value *final_value = nullptr;
 
-  if (DYN_OPT_DEBUG_LLVM_IR_TRACE_PRINTK) {
+  if (MorpheusCompiler::getInstance().get_config().enable_debug_printk) {
     IRBCase.CreateTracePrintk("Map: " + tableName + " -> Optimized branch hit for key " + value.first + "!\n");
   }
 

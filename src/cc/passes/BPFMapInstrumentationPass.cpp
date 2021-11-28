@@ -107,7 +107,7 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
       if (!dyn_opt::utils::mapCanBeInstrumented(table)) {
         spdlog::get("Morpheus")->debug("[BPFInstr Pass] Skipping map: {} since it cannot be instrumented", table->name);
         continue;
-      } else if (table->max_entries <= dynamic_opt_compiler.getMaxOffloadedEntries() && table->type != BPF_MAP_TYPE_LPM_TRIE && INSTRUMENT_EVERYTHING == 0) {
+      } else if (table->max_entries <= dynamic_opt_compiler.getMaxOffloadedEntries() && table->type != BPF_MAP_TYPE_LPM_TRIE && !MorpheusCompiler::getInstance().get_config().naive_instrumentation) {
         spdlog::get("Morpheus")->debug("[BPFInstr Pass] No need to instrument map: {}. All entries can be offloaded (max_size <= MAX_OFFLOADED_ENTRIES)", table->name);
         continue;
       }
@@ -121,7 +121,7 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
         genericTable.get_table_offline(values, dynamic_opt_compiler.getMaxOffloadedEntries()*2);
       }
 
-      if (values.size() <= dynamic_opt_compiler.getMaxOffloadedEntries() && table->type != BPF_MAP_TYPE_LPM_TRIE && INSTRUMENT_EVERYTHING == 0) {
+      if (values.size() <= dynamic_opt_compiler.getMaxOffloadedEntries() && table->type != BPF_MAP_TYPE_LPM_TRIE && !MorpheusCompiler::getInstance().get_config().naive_instrumentation) {
         spdlog::get("Morpheus")->debug("[BPFInstr Pass] No need to instrument map: {}. All entries can be offloaded (runtime_size <= MAX_OFFLOADED_ENTRIES)",
                  table->name);
         continue;
@@ -148,8 +148,8 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
 
       // What I want to do here is to add a random number generator in oder to perform the instrumentation
       // on X packets, so that we can reduce the overhead.
-      if (DYN_COMPILER_INSTRUMENTATION_PERCENTAGE < 100) {
-        uint64_t percentage = std::stoul(std::to_string(DYN_COMPILER_INSTRUMENTATION_PERCENTAGE));
+      if (MorpheusCompiler::getInstance().get_config().instrumentation_rate < 100) {
+        uint64_t percentage = std::stoul(std::to_string(MorpheusCompiler::getInstance().get_config().instrumentation_rate));
         uint64_t max = std::numeric_limits<uint32_t>::max();
         uint64_t max_range = (max * percentage) / 100;
 
@@ -195,18 +195,18 @@ void BPFMapInstrumentationPass::createLookupAndUpdateValue(TableDesc &instrument
     res_value = builder.CreateInstrumentedMapLookup(instrumented_map.fd,
                                                     Type::getInt64PtrTy(originalHelperCall->getContext()),
                                                     origin_key_ptr, defaultBlock, max_range,
-                                                    DYN_OPT_DEBUG_LLVM_IR_TRACE_PRINTK);
+                                                    MorpheusCompiler::getInstance().get_config().enable_debug_printk);
   } else if (instrumented_map.type == BPF_MAP_TYPE_PERCPU_HASH ||
               instrumented_map.type == BPF_MAP_TYPE_LRU_PERCPU_HASH) {
     res_value = builder.CreateInstrumentedMapLookupOrInit(instrumented_map.fd,
                                                           Type::getInt64PtrTy(originalHelperCall->getContext()),
                                                           origin_key_ptr, defaultBlock, max_range,
-                                                          DYN_OPT_DEBUG_LLVM_IR_TRACE_PRINTK);
+                                                          MorpheusCompiler::getInstance().get_config().enable_debug_printk);
   } else {
     assert(false && "[BPFInstr Pass] Unsupported instrumented map type");
   }
 
-  if (DYN_OPT_DEBUG_LLVM_IR_TRACE_PRINTK) {
+  if (MorpheusCompiler::getInstance().get_config().enable_debug_printk) {
     builder.CreateTracePrintk(
             "Updating value of instrumented map with fd: " + std::to_string(instrumented_map.fd) + "\n");
   }

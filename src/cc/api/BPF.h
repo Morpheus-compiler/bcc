@@ -26,6 +26,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <spdlog/spdlog.h>
+#include <iostream>
+#include <iomanip>
 
 #include "BPFTable.h"
 #include "bcc_exception.h"
@@ -58,14 +60,16 @@ class BPF {
                bool allow_rlimit = true, const ebpf::BPF *other = nullptr, bool dynamic_opt_enabled = false,
                std::function<bool(int)> &&dynamic_opt_callback = nullptr)
       : flag_(flag),
-        bsymcache_(nullptr),
-        dynamic_opt_enabled_(dynamic_opt_enabled && DYN_COMPILER_ENABLE_RUNTIME_OPTS),
-        bpf_module_(new BPFModule(flag, ts, rw_engine_enabled, dynamic_opt_enabled_,
-                                  maps_ns, allow_rlimit,
-                                  other == nullptr ? "" : other->bpf_module_->id())) {
-          
+        bsymcache_(nullptr) {
+
+    auto &dynamic_compiler = MorpheusCompiler::getInstance();
+
+    dynamic_opt_enabled_ = dynamic_opt_enabled && dynamic_compiler.get_config().enable_runtime_opts;
+    bpf_module_ = std::unique_ptr<BPFModule>(new BPFModule (flag, ts, rw_engine_enabled, dynamic_opt_enabled_,
+                                              maps_ns, allow_rlimit,
+                                              other == nullptr ? "" : other->bpf_module_->id()));
+
     if (dynamic_opt_enabled_) {
-      auto &dynamic_compiler = MorpheusCompiler::getInstance();
       dynamic_compiler.logger->info("[BPF] Enabling Morpheus optimizations");
       quit_thread_ = false;
       opt_ready_ = false;

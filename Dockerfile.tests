@@ -77,6 +77,12 @@ RUN mkdir -p /bison-3.8 && \
     cd bison-3.8 && ./configure && make -j && make install && \
     cd .. && rm -rf bison-3.8
 
+RUN git clone --depth 1 --branch yaml-cpp-0.7.0 https://github.com/jbeder/yaml-cpp.git && \
+    cd yaml-cpp && \
+    mkdir build && cd build && \
+    cmake .. && make -j && make install && \
+    cd ../.. && rm -rf yaml-cpp
+
 RUN wget -O ruby-install-0.7.0.tar.gz \
          https://github.com/postmodern/ruby-install/archive/v0.7.0.tar.gz && \
     tar -xzvf ruby-install-0.7.0.tar.gz && \

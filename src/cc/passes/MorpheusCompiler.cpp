@@ -20,94 +20,74 @@
 #include "macro_logger.h"
 #include "bpf_module.h"
 #include "api/BPF.h"
+#include <fstream>
+#include <iostream>
+
+#include <yaml-cpp/node/node.h>
+#define CONFIGFILEDIR "/etc/morpheus"
+#define CONFIGFILENAME "morpheus.yaml"
+#define CONFIGFILE (CONFIGFILEDIR "/" CONFIGFILENAME)
 
 namespace ebpf {
 
     MorpheusCompiler::MorpheusCompiler() : trace_guard_prog(new ebpf::BPF()), quit_thread_(false),
                                                initialized_(false), engine_(time(nullptr)) {
       init();
-      max_offloaded_entries_ = MAX_OFFLOADED_ENTRIES;
+      max_offloaded_entries_ = config_.max_offloaded_entries;
       dynamic_compiler_enabled_ = false;
 
-      if (DYN_COMPILER_ENABLE_GUARDS_UPDATE && !DYN_COMPILER_ENABLE_GUARDS) {
+      if (config_.enable_guard && !config_.enable_guards_update) {
         assert(false && "You cannot enable the guard update without enabling the guards");
       }
     }
 
     int MorpheusCompiler::init() {
       initlogger();
+      read_config_file(CONFIGFILE);
+
       // TODO: Make it configurable somewhere
       logger->set_level(spdlog::level::info);
 
-      std::vector<std::string> cflags = {};
-      std::unique_lock<std::mutex> dyn_guard(dyn_mutex);
-
-      if (DYN_COMPILER_ENABLE_GUARDS && DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
-
-        auto init_res = trace_guard_prog->init(BPF_GUARD_PROG, cflags, {});
-
-        if (init_res.code() != 0) {
-          logger->error("Error while initializing map guard tracing program: {}", init_res.msg());
-          return -1;
-        }
-
-        auto attach_res = trace_guard_prog->attach_kprobe("htab_map_update_elem", "on_map_update_elem2");
-
-        // attach_res = bpf->attach_tracepoint("bpf:bpf_map_delete_elem", "on_bpf_map_delete_elem");
-        if (attach_res.code() != 0) {
-          logger->error(" Error while attaching map guard tracing program: {}", init_res.msg());
-          return -2;
-        }
-
-        attach_res = trace_guard_prog->attach_kprobe("__htab_map_lookup_elem", "on_map_lookup_elem");
-
-        if (attach_res.code() != 0) {
-          logger->error(" Error while attaching map guard tracing program: {}", init_res.msg());
-          return -2;
-        }
-
-        auto open_res = trace_guard_prog->open_perf_buffer("map_change",
-                                                          [](void *cb_cookie, void *p_data, int data_size) {
-                                                              auto *data = static_cast<struct data_def *>(p_data);
-                                                              struct bpf_map_info info = {};
-                                                              uint32_t info_len = sizeof(info);
-                                                              bpf_obj_get_info(data->fd, &info, &info_len);
-
-                                                              auto *c = static_cast<MorpheusCompiler *>(cb_cookie);
-                                                              if (c == nullptr)
-                                                                throw std::runtime_error("Bad controller");
-
-                                                              if (c->quit_thread_) return;
-
-                                                              c->notify(data->event, data->fd);
-                                                          }, nullptr, this);
-
-        quit_thread_ = false;
-        polling_thread_ = std::thread(&MorpheusCompiler::poll_guard_program, this);
-      }
       initialized_ = true;
       return 0;
     }
 
-    MorpheusCompiler::~MorpheusCompiler() {
-      if (DYN_COMPILER_ENABLE_GUARDS && DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
-        unregisterAllCallbacks();
+    MorpheusCompiler::~MorpheusCompiler() {}
 
-        if (initialized_) {
-          quit_thread_ = true;
-          polling_thread_.join();
-        }
-
-        auto detach_res = trace_guard_prog->detach_kprobe("map_update_elem");
-        if (detach_res.code() != 0) {
-          logger->error("Error while detaching kprobe: {}", detach_res.msg());
-        }
-
-        detach_res = trace_guard_prog->detach_kprobe("map_lookup_elem");
-        if (detach_res.code() != 0) {
-          logger->error("Error while detaching kprobe: {}", detach_res.msg());
-        }
+    void MorpheusCompiler::create_config_file(std::string path) {
+      mkdir(CONFIGFILEDIR, 0755);
+      std::ofstream file(path);
+      if (!file.good()) {
+        throw std::runtime_error("Error creating configuration file");
       }
+
+      struct MorpheusConfigStruct defaultConfig;
+      YAML::Node node;  // starts out as null
+      node["Morpheus"] = defaultConfig;
+
+      file << node;
+      file.flush();
+      file.close();
+    }
+
+    void MorpheusCompiler::read_config_file(std::string path) {
+      logger->info("loading configuration from {}", path);
+      std::ifstream file(path);
+      if (!file.good()) {
+        logger->warn("Default configuration file ({}) for Morpheus not found, " 
+                      "creating a new file with default parameters", CONFIGFILE);
+        create_config_file(CONFIGFILE);
+      }
+      file.close();
+
+      YAML::Node config = YAML::LoadFile(path);
+      struct MorpheusConfigStruct readConfig = config["Morpheus"].as<MorpheusConfigStruct>();
+
+      config_ = readConfig;
+    }
+
+    const struct ebpf::MorpheusConfigStruct &MorpheusCompiler::get_config() {
+      return config_;
     }
 
     void MorpheusCompiler::initlogger() {
@@ -141,7 +121,7 @@ namespace ebpf {
     }
 
     void MorpheusCompiler::update_bpf_map(int fd) {
-      if (!DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+      if (!config_.enable_guards_update) {
         return;
       }
       auto filteredIDsTable = trace_guard_prog->get_percpu_hash_table<int, uint64_t>("filtered_ids");
@@ -150,7 +130,7 @@ namespace ebpf {
     }
 
     void MorpheusCompiler::add_entries_to_bpf_map(const std::map<int, TableDesc> *pMap) {
-      if (!DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+      if (!config_.enable_guards_update) {
         return;
       }
       auto filteredIDsTable = trace_guard_prog->get_percpu_hash_table<int, uint64_t>("filtered_ids");
@@ -161,7 +141,7 @@ namespace ebpf {
     }
 
     void MorpheusCompiler::remove_entries_from_bpf_map(const std::map<int, TableDesc> *pMap) {
-      if (!DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+      if (!config_.enable_guards_update) {
         return;
       }
       auto filteredIDsTable = trace_guard_prog->get_percpu_hash_table<int, uint64_t>("filtered_ids");
@@ -171,7 +151,7 @@ namespace ebpf {
     }
 
     void MorpheusCompiler::update_filtered_map_ids(int callback_id) {
-      if (!DYN_COMPILER_ENABLE_GUARDS_UPDATE) {
+      if (!config_.enable_guards_update) {
         return;
       }
       if (map_to_guards_list_.find(callback_id) != map_to_guards_list_.end()) {
@@ -200,7 +180,7 @@ namespace ebpf {
     }
 
     int MorpheusCompiler::registerCallback(callbackFunc &&func, std::map<int, TableDesc> *map_to_guards) {
-      assert(DYN_COMPILER_ENABLE_GUARDS_UPDATE && "This function should be never called if DYN_COMPILER_ENABLE_GUARDS_UPDATE is disabled");
+      assert(config_.enable_guards_update && "This function should be never called if DYN_COMPILER_ENABLE_GUARDS_UPDATE is disabled");
       std::lock_guard<std::mutex> lock(notify_mutex);
 
       int random_key = uniform_distribution_(engine_);
@@ -213,7 +193,7 @@ namespace ebpf {
 
 
     void MorpheusCompiler::unregisterAllCallbacks() {
-      assert(DYN_COMPILER_ENABLE_GUARDS_UPDATE && "This function should be never called if DYN_COMPILER_ENABLE_GUARDS_UPDATE is disabled");
+      assert(config_.enable_guards_update && "This function should be never called if DYN_COMPILER_ENABLE_GUARDS_UPDATE is disabled");
       std::lock_guard<std::mutex> lock(notify_mutex);
       for (const auto &it : callback_functions_) {
         remove_entries_from_bpf_map(map_to_guards_list_[it.first]);
@@ -223,7 +203,7 @@ namespace ebpf {
     }
 
     void MorpheusCompiler::unregisterCallback(int callback_id) {
-      assert(DYN_COMPILER_ENABLE_GUARDS_UPDATE && "This function should be never called if DYN_COMPILER_ENABLE_GUARDS_UPDATE is disabled");
+      assert(config_.enable_guards_update && "This function should be never called if DYN_COMPILER_ENABLE_GUARDS_UPDATE is disabled");
       std::lock_guard<std::mutex> lock(notify_mutex);
 
       if (callback_functions_.count(callback_id) > 0) {
@@ -234,7 +214,7 @@ namespace ebpf {
     }
 
     void MorpheusCompiler::notify(map_event event, int fd) {
-      assert(DYN_COMPILER_ENABLE_GUARDS_UPDATE && "This function should be never called if DYN_COMPILER_ENABLE_GUARDS_UPDATE is disabled");
+      assert(config_.enable_guards_update && "This function should be never called if DYN_COMPILER_ENABLE_GUARDS_UPDATE is disabled");
       std::lock_guard<std::mutex> lock(notify_mutex);
 
       for (const auto &it : callback_functions_) {
@@ -245,74 +225,4 @@ namespace ebpf {
         }
       }
     }
-
-    const std::string MorpheusCompiler::BPF_GUARD_PROG = R"(
-        #include <linux/sched.h>
-        #include <linux/file.h>
-        #include <linux/bpf.h>
-        #include <linux/fdtable.h>
-        #include <linux/fs.h>
-        #include <uapi/linux/ptrace.h>
-
-        BPF_TABLE("percpu_hash", int, uint64_t, filtered_ids, 1024);
-        BPF_PERF_OUTPUT(map_change);
-
-        typedef enum {
-            UPDATE,	// update
-            DELETE	// delete
-        } map_event;
-
-        struct data_def {
-            map_event event;
-            u32 fd;
-            //u32 key[10];
-            //u32 key_len;
-            //u32 val[10];
-            //u32 val_len;
-        };
-
-        int on_map_update_elem(struct pt_regs *ctx, union bpf_attr *attr)
-        {
-            struct data_def data = {};
-
-            data.event = UPDATE;
-            data.fd = attr->map_fd;
-
-            uint64_t *present = filtered_ids.lookup(&data.fd);
-            if (!present) {
-              //bpf_trace_printk("Skipping this map. We are not interested to it!\n");
-              return 0;
-            }
-
-            bpf_trace_printk("Map update for %d\n", data.fd);
-
-            // I can do the update directly into this code; this will be executed
-            // before the actual map update and will avoid the inconsistency between
-            // the map update and the guard update.
-
-            map_change.perf_submit(ctx, &data, sizeof(data));
-            return 0;
-        }
-
-        int on_map_update_elem2(struct pt_regs *ctx, struct bpf_map *map)
-        {
-            bpf_trace_printk("Map update for %d\n", map->id);
-
-            return 0;
-        }
-
-        int on_map_lookup_elem(struct pt_regs *ctx, struct bpf_map *map)
-        {
-            bpf_trace_printk("Map looukp for %d\n", map->id);
-
-            return 0;
-        }
-
-        int on_map_trie_lookup_elem(struct pt_regs *ctx, struct bpf_map *map)
-        {
-            bpf_trace_printk("Map looukp for %d\n", map->id);
-
-            return 0;
-        }
-    )";
 }

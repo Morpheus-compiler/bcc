@@ -101,7 +101,7 @@ namespace ebpf {
         }
 
         first_time_dyn_pass_ = false;
-        if (DYN_COMPILER_ENABLE_INSTRUMENTATION) {
+        if (MorpheusCompiler::getInstance().get_config().enable_instrumentation) {
           if (int rc = run_dyn_instrumentation_manager(*mod_runtime_ptr_, func_name)) {
             return rc;
           }
@@ -150,7 +150,7 @@ namespace ebpf {
         auto hash2 = FunctionComparator::functionHash(*current_func);
 
         dyn_opt_runs++;
-        if ((hash1 == hash2) && (saved_offloaded_entries_ == offloaded_entries) && !ALWAYS_SWAP_PROGRAM) {
+        if ((hash1 == hash2) && (saved_offloaded_entries_ == offloaded_entries) && !MorpheusCompiler::getInstance().get_config().always_swap_program) {
           spdlog::get("Morpheus")->info("[bpf_module] No changes detected, skipping reloading");
           return BPFModule::NO_MODULE_CHANGES;
         } else {
@@ -167,7 +167,7 @@ namespace ebpf {
     int BPFModule::finalize_runtime_module() {
       sections_.clear();
 
-      if (rw_engine_enabled_ && DYN_COMPILER_ENABLE_INSTRUMENTATION) {
+      if (rw_engine_enabled_ && MorpheusCompiler::getInstance().get_config().enable_instrumentation) {
         if (int rc = annotate_runtime_module())
           return rc;
       }
@@ -269,8 +269,9 @@ namespace ebpf {
       PassManagerBuilder PMB;
       PMB.OptLevel = 3;
 
+      auto &morpheusConfig = MorpheusCompiler::getInstance().get_config();
       PM.add(DynamicMapOptAnalysisPass::createDynamicMapOptAnalysisPass(id_, func_name, ts_, fake_fd_map_, tables_));
-      if (DYN_COMPILER_ENABLE_INSTRUMENTATION && (DYN_OPT_ALWAYS_INSTRUMENT || ((dyn_opt_runs % 10) <= STOP_INTRUMENTATION_AFTER_CYCLES))) {
+      if (morpheusConfig.enable_instrumentation && (morpheusConfig.always_instrument || ((dyn_opt_runs % 10) <= morpheusConfig.stop_instrumentation_after_cycles))) {
         PM.add(BPFMapInstrumentationPass::createBPFMapInstrumentationPass(id_, func_name, ts_, fake_fd_map_, tables_,
                                                                           original_maps_to_instrumented_maps_));
       }
