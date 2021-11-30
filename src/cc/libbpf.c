@@ -353,6 +353,26 @@ int bcc_create_map(enum bpf_map_type map_type, const char *name,
   return bcc_create_map_xattr(&attr, true);
 }
 
+int bcc_create_map_node(enum bpf_map_type map_type, const char *name,
+                   int key_size, int value_size, int max_entries,
+                   int map_flags, int node) 
+{
+  struct bpf_create_map_attr attr = {};
+	
+	attr.map_type = map_type;
+  attr.name = name;
+	attr.key_size = key_size;
+	attr.value_size = value_size;
+	attr.max_entries = max_entries;
+  attr.map_flags = map_flags;
+	if (node >= 0) {
+		attr.numa_node = node;
+		attr.map_flags |= BPF_F_NUMA_NODE;
+	}
+
+  return bcc_create_map_xattr(&attr, true);
+}
+
 int bpf_update_elem(int fd, void *key, void *value, unsigned long long flags)
 {
   return bpf_map_update_elem(fd, key, value, flags);

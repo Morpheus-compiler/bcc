@@ -226,6 +226,15 @@ string BPFModule::make_reader(Module *mod, Type *type) {
   //   return 0;
   // }
 
+  string name = "reader" + std::to_string(readers_.size());
+
+  make_reader(mod, type, name);
+
+  readers_[type] = name;
+  return name;
+}
+
+void BPFModule::make_reader(Module *mod, Type *type, std::string &r_name) {
   IRBuilder<> B(*ctx_);
 
   FunctionType *sscanf_fn_type = FunctionType::get(
@@ -238,11 +247,10 @@ string BPFModule::make_reader(Module *mod, Type *type) {
     sscanf_fn->addFnAttr(Attribute::NoUnwind);
   }
 
-  string name = "reader" + std::to_string(readers_.size());
   vector<Type *> fn_args({B.getInt8PtrTy(), PointerType::getUnqual(type)});
   FunctionType *fn_type = FunctionType::get(B.getInt32Ty(), fn_args, /*isVarArg=*/false);
   Function *fn =
-      Function::Create(fn_type, GlobalValue::ExternalLinkage, name, mod);
+      Function::Create(fn_type, GlobalValue::ExternalLinkage, r_name, mod);
   auto arg_it = fn->arg_begin();
   Argument *arg_in = &*arg_it;
   ++arg_it;
@@ -268,9 +276,32 @@ string BPFModule::make_reader(Module *mod, Type *type) {
   finish_sscanf(B, &args, &fmt, locals, true);
 
   B.CreateRet(B.getInt32(0));
+}
 
-  readers_[type] = name;
-  return name;
+bool BPFModule::has_reader(Type *type) {
+  auto fn_it = readers_.find(type);
+  if (fn_it != readers_.end())
+    return true;
+
+  return false;
+}
+
+bool BPFModule::has_writer(Type *type) {
+  auto fn_it = writers_.find(type);
+  if (fn_it != writers_.end())
+    return true;
+
+  return false;
+}
+
+void BPFModule::make_all_readers_and_writers(Module *mod) {
+  for (auto &reader : readers_) {
+    make_reader(mod, reader.first, reader.second);
+  }
+
+  for (auto &writer : writers_) {
+    make_writer(mod, writer.first, writer.second);
+  }
 }
 
 // make_writer generates a dynamic function in the instruction set of the host
@@ -299,10 +330,20 @@ string BPFModule::make_writer(Module *mod, Type *type) {
   IRBuilder<> B(*ctx_);
 
   string name = "writer" + std::to_string(writers_.size());
+
+  make_writer(mod, type, name);
+
+  writers_[type] = name;
+  return name;
+}
+
+void BPFModule::make_writer(Module *mod, Type *type, std::string &w_name) {
+  IRBuilder<> B(*ctx_);
+
   vector<Type *> fn_args({B.getInt8PtrTy(), B.getInt64Ty(), PointerType::getUnqual(type)});
   FunctionType *fn_type = FunctionType::get(B.getInt32Ty(), fn_args, /*isVarArg=*/false);
   Function *fn =
-      Function::Create(fn_type, GlobalValue::ExternalLinkage, name, mod);
+      Function::Create(fn_type, GlobalValue::ExternalLinkage, w_name, mod);
   auto arg_it = fn->arg_begin();
   Argument *arg_out = &*arg_it;
   ++arg_it;
@@ -343,9 +384,6 @@ string BPFModule::make_writer(Module *mod, Type *type) {
   call->setTailCall(true);
 
   B.CreateRet(call);
-
-  writers_[type] = name;
-  return name;
 }
 
 unique_ptr<ExecutionEngine> BPFModule::finalize_rw(unique_ptr<Module> m) {

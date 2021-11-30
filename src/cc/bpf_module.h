@@ -16,7 +16,10 @@
 
 #pragma once
 
-#include <stdint.h>
+#include "nlohmann/json.hpp"
+#include "macro_logger.h"
+
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -24,10 +27,12 @@
 
 #include "bcc_exception.h"
 #include "table_storage.h"
+#include "passes/MorpheusCompiler.h"
 
 namespace llvm {
 class ExecutionEngine;
 class Function;
+class FunctionPass;
 class LLVMContext;
 class Module;
 class Type;
@@ -62,126 +67,169 @@ class ClangLoader;
 class FuncSource;
 class BTF;
 
-bool bpf_module_rw_engine_enabled(void);
+bool bpf_module_rw_engine_enabled();
 
 class BPFModule {
- private:
-  static const std::string FN_PREFIX;
-  int init_engine();
-  void initialize_rw_engine();
-  void cleanup_rw_engine();
-  int parse(llvm::Module *mod);
-  int finalize();
-  int annotate();
-  void annotate_light();
-  std::unique_ptr<llvm::ExecutionEngine> finalize_rw(std::unique_ptr<llvm::Module> mod);
-  std::string make_reader(llvm::Module *mod, llvm::Type *type);
-  std::string make_writer(llvm::Module *mod, llvm::Type *type);
-  void dump_ir(llvm::Module &mod);
-  int load_file_module(std::unique_ptr<llvm::Module> *mod, const std::string &file, bool in_memory);
-  int load_includes(const std::string &text);
-  int load_cfile(const std::string &file, bool in_memory, const char *cflags[], int ncflags);
-  int kbuild_flags(const char *uname_release, std::vector<std::string> *cflags);
-  int run_pass_manager(llvm::Module &mod);
-  StatusTuple sscanf(std::string fn_name, const char *str, void *val);
-  StatusTuple snprintf(std::string fn_name, char *str, size_t sz,
-                       const void *val);
-  void load_btf(sec_map_def &sections);
-  int load_maps(sec_map_def &sections);
-  int create_maps(std::map<std::string, std::pair<int, int>> &map_tids,
+private:
+    static const std::string FN_PREFIX;
+    int init_engine();
+    void initialize_rw_engine();
+    void cleanup_rw_engine();
+    int parse(llvm::Module *mod);
+    int finalize();
+    int annotate();
+    void annotate_light();
+    std::unique_ptr<llvm::ExecutionEngine> finalize_rw(std::unique_ptr<llvm::Module> mod);
+    std::string make_reader(llvm::Module *mod, llvm::Type *type);
+    std::string make_writer(llvm::Module *mod, llvm::Type *type);
+    void make_all_readers_and_writers(llvm::Module *mod);
+    void make_reader(llvm::Module *mod, llvm::Type *type, std::string &r_name);
+    void make_writer(llvm::Module *mod, llvm::Type *type, std::string &w_name);
+    bool has_reader(llvm::Type *type);
+    bool has_writer(llvm::Type *type);
+    void dump_ir(llvm::Module &mod);
+    void dump_ir_to_file(llvm::Module &mod, std::string file_name);
+    int load_file_module(std::unique_ptr<llvm::Module> *mod, const std::string &file, bool in_memory);
+    int load_includes(const std::string &text);
+    int load_cfile(const std::string &file, bool in_memory, const char *cflags[], int ncflags);
+    int kbuild_flags(const char *uname_release, std::vector<std::string> *cflags);
+    int run_pass_manager(llvm::Module &mod);
+    int run_dyn_pass_manager(llvm::Module &mod, const std::string &func_name, std::vector<std::string> &offloaded_entries);
+    int run_dyn_instrumentation_manager(llvm::Module &mod, const std::string &func_name);
+    StatusTuple sscanf(std::string fn_name, const char *str, void *val);
+    StatusTuple snprintf(std::string fn_name, char *str, size_t sz,
+                         const void *val);
+    StatusTuple sscanf_instrumentation(std::string fn_name, const char *str, void *val);
+    StatusTuple snprintf_instrumentation(std::string fn_name, char *str, size_t sz, const void *val);
+    void load_btf(sec_map_def &sections);
+    int load_maps(sec_map_def &sections);
+    int update_maps(sec_map_def &sections);
+    int create_maps(std::map<std::string, std::pair<int, int>> &map_tids,
                   std::map<int, int> &map_fds,
                   std::map<std::string, int> &inner_map_fds,
                   bool for_inner_map);
 
- public:
-  BPFModule(unsigned flags, TableStorage *ts = nullptr, bool rw_engine_enabled = true,
-            const std::string &maps_ns = "", bool allow_rlimit = true,
-            const char *dev_name = nullptr);
-  ~BPFModule();
-  int free_bcc_memory();
-  int load_b(const std::string &filename, const std::string &proto_filename);
-  int load_c(const std::string &filename, const char *cflags[], int ncflags);
-  int load_string(const std::string &text, const char *cflags[], int ncflags);
-  std::string id() const { return id_; }
-  std::string maps_ns() const { return maps_ns_; }
-  size_t num_functions() const;
-  uint8_t * function_start(size_t id) const;
-  uint8_t * function_start(const std::string &name) const;
-  const char * function_source(const std::string &name) const;
-  const char * function_source_rewritten(const std::string &name) const;
-  int annotate_prog_tag(const std::string &name, int fd,
-			struct bpf_insn *insn, int prog_len);
-  const char * function_name(size_t id) const;
-  size_t function_size(size_t id) const;
-  size_t function_size(const std::string &name) const;
-  size_t num_tables() const;
-  size_t table_id(const std::string &name) const;
-  int table_fd(size_t id) const;
-  int table_fd(const std::string &name) const;
-  const char * table_name(size_t id) const;
-  int table_type(const std::string &name) const;
-  int table_type(size_t id) const;
-  size_t table_max_entries(const std::string &name) const;
-  size_t table_max_entries(size_t id) const;
-  int table_flags(const std::string &name) const;
-  int table_flags(size_t id) const;
-  const char * table_key_desc(size_t id) const;
-  const char * table_key_desc(const std::string &name) const;
-  size_t table_key_size(size_t id) const;
-  size_t table_key_size(const std::string &name) const;
-  int table_key_printf(size_t id, char *buf, size_t buflen, const void *key);
-  int table_key_scanf(size_t id, const char *buf, void *key);
-  const char * table_leaf_desc(size_t id) const;
-  const char * table_leaf_desc(const std::string &name) const;
-  size_t table_leaf_size(size_t id) const;
-  size_t table_leaf_size(const std::string &name) const;
-  int table_leaf_printf(size_t id, char *buf, size_t buflen, const void *leaf);
-  int table_leaf_scanf(size_t id, const char *buf, void *leaf);
-  char * license() const;
-  unsigned kern_version() const;
-  TableStorage &table_storage() { return *ts_; }
-  int bcc_func_load(int prog_type, const char *name,
-                    const struct bpf_insn *insns, int prog_len,
-                    const char *license, unsigned kern_version,
-                    int log_level, char *log_buf, unsigned log_buf_size,
-                    const char *dev_name = nullptr,
-                    unsigned flags = 0);
-  int bcc_func_attach(int prog_fd, int attachable_fd,
-                      int attach_type, unsigned int flags);
-  int bcc_func_detach(int prog_fd, int attachable_fd, int attach_type);
-  size_t perf_event_fields(const char *) const;
-  const char * perf_event_field(const char *, size_t i) const;
+    // Newly added function for runtime optimizations
+    int finalize_runtime_module();
+    int annotate_runtime_module();
+    void cleanup_rw_instr_engine();
 
- private:
-  unsigned flags_;  // 0x1 for printing
-  bool rw_engine_enabled_;
-  bool used_b_loader_;
-  bool allow_rlimit_;
-  std::string filename_;
-  std::string proto_filename_;
-  std::unique_ptr<llvm::LLVMContext> ctx_;
-  std::unique_ptr<llvm::ExecutionEngine> engine_;
-  std::unique_ptr<llvm::ExecutionEngine> rw_engine_;
-  std::unique_ptr<llvm::Module> mod_;
-  std::unique_ptr<FuncSource> func_src_;
-  sec_map_def sections_;
-  std::vector<TableDesc *> tables_;
-  std::map<std::string, size_t> table_names_;
-  std::vector<std::string> function_names_;
-  std::map<llvm::Type *, std::string> readers_;
-  std::map<llvm::Type *, std::string> writers_;
-  std::string id_;
-  std::string maps_ns_;
-  std::string mod_src_;
-  std::map<std::string, std::string> src_dbg_fmap_;
-  TableStorage *ts_;
-  std::unique_ptr<TableStorage> local_ts_;
-  BTF *btf_;
-  fake_fd_map_def fake_fd_map_;
-  unsigned int ifindex_;
 
-  // map of events -- key: event name, value: event fields
-  std::map<std::string, std::vector<std::string>> perf_events_;
+public:
+    BPFModule(unsigned flags, TableStorage *ts = nullptr, bool rw_engine_enabled = true,
+              bool dynamic_opt_enabled = false, std::string maps_ns = "",
+              bool allow_rlimit = true, std::string other_id = "", const char *dev_name = nullptr);
+    ~BPFModule();
+    int free_bcc_memory();
+    int load_b(const std::string &filename, const std::string &proto_filename);
+    int load_c(const std::string &filename, const char *cflags[], int ncflags);
+    int load_string(const std::string &text, const char *cflags[], int ncflags);
+    std::string id() const { return id_; }
+    std::string maps_ns() const { return maps_ns_; }
+    std::string other_id() const { return other_id_; }
+    size_t num_functions() const;
+    uint8_t * function_start(size_t id) const;
+    uint8_t * function_start(const std::string &name) const;
+    const char * function_source(const std::string &name) const;
+    const char * function_source_rewritten(const std::string &name) const;
+    int annotate_prog_tag(const std::string &name, int fd,
+                          struct bpf_insn *insn, int prog_len);
+    const char * function_name(size_t id) const;
+    size_t function_size(size_t id) const;
+    size_t function_size(const std::string &name) const;
+    size_t num_tables() const;
+    size_t table_id(const std::string &name) const;
+    int table_fd(size_t id) const;
+    int table_fd(const std::string &name) const;
+    const char * table_name(size_t id) const;
+    int table_type(const std::string &name) const;
+    int table_type(size_t id) const;
+    size_t table_max_entries(const std::string &name) const;
+    size_t table_max_entries(size_t id) const;
+    int table_flags(const std::string &name) const;
+    int table_flags(size_t id) const;
+    const char * table_key_desc(size_t id) const;
+    const char * table_key_desc(const std::string &name) const;
+    size_t table_key_size(size_t id) const;
+    size_t table_key_size(const std::string &name) const;
+    int table_key_printf(size_t id, char *buf, size_t buflen, const void *key);
+    int table_key_scanf(size_t id, const char *buf, void *key);
+    const char * table_leaf_desc(size_t id) const;
+    const char * table_leaf_desc(const std::string &name) const;
+    size_t table_leaf_size(size_t id) const;
+    size_t table_leaf_size(const std::string &name) const;
+    int table_leaf_printf(size_t id, char *buf, size_t buflen, const void *leaf);
+    int table_leaf_scanf(size_t id, const char *buf, void *leaf);
+    char * license() const;
+    unsigned kern_version() const;
+    TableStorage &table_storage() { return *ts_; }
+    int bcc_func_load(int prog_type, const char *name,
+                      const struct bpf_insn *insns, int prog_len,
+                      const char *license, unsigned kern_version,
+                      int log_level, char *log_buf, unsigned log_buf_size,
+                      const char *dev_name = nullptr,
+                      unsigned flags = 0);
+    int bcc_func_attach(int prog_fd, int attachable_fd,
+                        int attach_type, unsigned int flags);
+    int bcc_func_detach(int prog_fd, int attachable_fd, int attach_type);
+    size_t perf_event_fields(const char *) const;
+    const char * perf_event_field(const char *, size_t i) const;
+
+    // Newly added function for runtime optimizations
+    int run_dynamic_opt_pass_manager(const std::string &func_name);
+    void update_guard(MorpheusCompiler::map_event event, int map_fd);
+    std::map<int, TableDesc> *getRuntimeMapToGuards();
+
+private:
+    unsigned flags_;  // 0x1 for printing
+    bool rw_engine_enabled_;
+    bool used_b_loader_;
+    bool allow_rlimit_;
+    std::string filename_;
+    std::string proto_filename_;
+    std::unique_ptr<llvm::LLVMContext> ctx_;
+    std::unique_ptr<llvm::ExecutionEngine> engine_;
+    std::unique_ptr<llvm::ExecutionEngine> rw_engine_;
+    std::unique_ptr<llvm::Module> mod_;
+    std::unique_ptr<FuncSource> func_src_;
+    sec_map_def sections_;
+    std::vector<TableDesc *> tables_;
+    std::map<std::string, size_t> table_names_;
+    std::vector<std::string> function_names_;
+    std::map<llvm::Type *, std::string> readers_;
+    std::map<llvm::Type *, std::string> writers_;
+    std::string id_;
+    std::string maps_ns_;
+    std::string other_id_;
+    std::string mod_src_;
+    std::map<std::string, std::string> src_dbg_fmap_;
+    TableStorage *ts_;
+    std::unique_ptr<TableStorage> local_ts_;
+    BTF *btf_;
+    fake_fd_map_def fake_fd_map_;
+    unsigned int ifindex_;
+
+    // map of events -- key: event name, value: event fields
+    std::map<std::string, std::vector<std::string>> perf_events_;
+
+    // New variables for dynamic optimizations
+    bool dynamic_opt_enabled_;
+    bool maps_loaded_;
+    bool first_time_dyn_pass_;
+    std::unique_ptr<llvm::ExecutionEngine> rw_instr_engine_;
+    llvm::Module *mod_original_{};
+    llvm::Module *mod_runtime_ptr_{};
+    llvm::Function *current_func;
+    std::unique_ptr<llvm::Module> mod_runtime_;
+
+    std::map<int, int> fake_fds_to_real_fds_;
+    std::map<int, TableDesc> original_maps_to_guards_;
+    std::map<int, TableDesc> original_maps_to_instrumented_maps_;
+    std::vector<std::string> saved_offloaded_entries_;
+    uint64_t dyn_opt_runs;
+
+public:
+    static const int NO_MODULE_CHANGES = 4096;
 };
 
 }  // namespace ebpf

@@ -16,3 +16,4 @@ examples/cgroupid/cgroupid
 # Output from docker builds
 scripts/docker/output/
 /output/
+.vscode

@@ -56,6 +56,27 @@ StatusTuple BPFTable::get_value(const std::string& key_str,
   return leaf_to_string(value, value_str);
 }
 
+StatusTuple BPFTable::get_value(void *key,
+                                std::vector<std::string>& value_str) {
+  size_t ncpus = get_possible_cpus().size();
+  //char key[desc.key_size];
+  char value[desc.leaf_size * ncpus];
+
+  StatusTuple r(0);
+
+  if (!lookup(key, value))
+    return StatusTuple(-1, "error getting value");
+
+  value_str.resize(ncpus);
+
+  for (size_t i = 0; i < ncpus; i++) {
+    r = leaf_to_string(value + i * desc.leaf_size, value_str.at(i));
+    if (r.code() != 0)
+      return r;
+  }
+  return StatusTuple::OK();
+}
+
 StatusTuple BPFTable::get_value(const std::string& key_str,
                                 std::vector<std::string>& value_str) {
   size_t ncpus = get_possible_cpus().size();
@@ -180,8 +201,80 @@ StatusTuple BPFTable::clear_table_non_atomic() {
   return StatusTuple::OK();
 }
 
+bool BPFTable::is_percpu_table() {
+  switch(desc.type) {
+    case BPF_MAP_TYPE_PERCPU_ARRAY:
+    case BPF_MAP_TYPE_PERCPU_HASH:
+    case BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE:
+    case BPF_MAP_TYPE_LRU_PERCPU_HASH:
+      return true;
+    default:
+      return false;
+  }
+}
+
+StatusTuple BPFTable::get_table_offline_percpu(std::vector<std::pair<std::string, std::vector<std::string>>> &res) {
+  StatusTuple r(0);
+
+  auto key = std::unique_ptr<void, decltype(::free)*>(::malloc(desc.key_size),
+                                                      ::free);
+////  auto value = std::unique_ptr<void, decltype(::free)*>(::malloc(desc.leaf_size),
+//                                                        ::free);
+  std::string key_str;
+//  std::string value_str;
+
+  if (desc.type == BPF_MAP_TYPE_PERCPU_ARRAY) {
+    // For arrays, just iterate over all indices
+    for (size_t i = 0; i < desc.max_entries; i++) {
+      std::vector<std::string> value;
+
+      r = key_to_string(&i, key_str);
+      if (r.code() != 0)
+        return r;
+
+      r = get_value(key_str, value);
+      if (r.code() != 0)
+        return r;
+
+      res.emplace_back(key_str, value);
+    }
+  } else {
+    res.clear();
+    // For other maps, try to use the first() and next() interfaces
+    if (!this->first(key.get())) {
+      return StatusTuple(0);
+    }
+
+    while (true) {
+      std::vector<std::string> value;
+      key_str.clear();
+
+      r = key_to_string(key.get(), key_str);
+      if (r.code() != 0)
+        return r;
+
+      r = get_value(key.get(), value);
+      if (r.code() == -1) {
+        break;
+      }
+      else if (r.code() != 0)
+        return r;
+      
+      res.emplace_back(key_str, value);
+      if (!this->next(key.get(), key.get()))
+        break;
+    }
+  }
+
+  return StatusTuple(0);
+}
+
+StatusTuple BPFTable::get_table_offline(std::vector<std::pair<std::string, std::string>> &res) {
+  return get_table_offline(res, desc.max_entries);
+}
+
 StatusTuple BPFTable::get_table_offline(
-  std::vector<std::pair<std::string, std::string>> &res) {
+  std::vector<std::pair<std::string, std::string>> &res, unsigned int max_entries) {
   StatusTuple r(0);
   int err;
 
@@ -202,7 +295,7 @@ StatusTuple BPFTable::get_table_offline(
       desc.type == BPF_MAP_TYPE_CPUMAP ||
       desc.type == BPF_MAP_TYPE_REUSEPORT_SOCKARRAY) {
     // For arrays, just iterate over all indices
-    for (size_t i = 0; i < desc.max_entries; i++) {
+    for (size_t i = 0; i < max_entries; i++) {
       err = bpf_lookup_elem(desc.fd, &i, value.get());
       if (err < 0 && errno == ENOENT) {
         // Element is not present, skip it
@@ -224,8 +317,9 @@ StatusTuple BPFTable::get_table_offline(
   } else {
     res.clear();
     // For other maps, try to use the first() and next() interfaces
-    if (!this->first(key.get()))
+    if (!this->first(key.get())) {
       return StatusTuple::OK();
+    }
 
     while (true) {
       if (!this->lookup(key.get(), value.get()))
@@ -238,12 +332,91 @@ StatusTuple BPFTable::get_table_offline(
       if (r.code() != 0)
         return r;
       res.emplace_back(key_str, value_str);
+
+      if (res.size() == max_entries)
+        break;
+
       if (!this->next(key.get(), key.get()))
         break;
     }
   }
 
   return StatusTuple::OK();
+}
+
+    StatusTuple BPFTable::get_table_offline_raw(
+            std::vector<std::pair<std::unique_ptr<void, decltype(::free)*>, std::unique_ptr<void, decltype(::free)*>>> &res) {
+      StatusTuple r(0);
+      int err;
+
+      std::string key_str;
+      std::string value_str;
+
+      if (desc.type == BPF_MAP_TYPE_ARRAY ||
+          desc.type == BPF_MAP_TYPE_PROG_ARRAY ||
+          desc.type == BPF_MAP_TYPE_PERF_EVENT_ARRAY ||
+          desc.type == BPF_MAP_TYPE_PERCPU_ARRAY ||
+          desc.type == BPF_MAP_TYPE_CGROUP_ARRAY ||
+          desc.type == BPF_MAP_TYPE_ARRAY_OF_MAPS ||
+          desc.type == BPF_MAP_TYPE_DEVMAP ||
+          desc.type == BPF_MAP_TYPE_CPUMAP ||
+          desc.type == BPF_MAP_TYPE_REUSEPORT_SOCKARRAY) {
+        // For arrays, just iterate over all indices
+        for (size_t i = 0; i < desc.max_entries; i++) {
+          auto key = std::unique_ptr<void, decltype(::free)*>(::malloc(desc.key_size),
+                                                              ::free);
+          auto value = std::unique_ptr<void, decltype(::free)*>(::malloc(desc.leaf_size),
+                                                                ::free);
+          err = bpf_lookup_elem(desc.fd, &i, value.get());
+          if (err < 0 && errno == ENOENT) {
+            // Element is not present, skip it
+            continue;
+          } else if (err < 0) {
+            // Other error, abort
+            return StatusTuple(-1, "Error looking up value: %s", std::strerror(errno));
+          }
+
+          std::copy(static_cast<const char *>(static_cast<const void *>(&i)),
+                    static_cast<const char *>(static_cast<const void *>(&i)) + desc.key_size,
+                    static_cast<char *>(static_cast<void *>(key.get())));
+
+          res.emplace_back(std::make_pair<std::unique_ptr<void, decltype(::free)*>, std::unique_ptr<void, decltype(::free)*>>(std::move(key), std::move(value)));
+        }
+      } else {
+        res.clear();
+
+        auto key_ext = std::unique_ptr<void, decltype(::free)*>(::malloc(desc.key_size),
+                                                            ::free);
+        // For other maps, try to use the first() and next() interfaces
+        if (!this->first(key_ext.get()))
+          return StatusTuple(0);
+
+        while (true) {
+          auto key = std::unique_ptr<void, decltype(::free)*>(::malloc(desc.key_size),
+                                                                  ::free);
+          auto value = std::unique_ptr<void, decltype(::free)*>(::malloc(desc.leaf_size),
+                                                                ::free);
+          if (!this->lookup(key_ext.get(), value.get()))
+            break;
+
+          std::copy(static_cast<const char *>(static_cast<const void *>(key_ext.get())),
+                    static_cast<const char *>(static_cast<const void *>(key_ext.get())) + desc.key_size,
+                    static_cast<char *>(static_cast<void *>(key.get())));
+//          std::copy((char *)key_ext.get(),
+//                    (char *)key_ext.get() + desc.key_size,
+//                    key.get());
+
+          res.emplace_back(std::make_pair<std::unique_ptr<void, decltype(::free)*>, std::unique_ptr<void, decltype(::free)*>>(std::move(key), std::move(value)));
+          if (!this->next(key_ext.get(), key_ext.get()))
+            break;
+        }
+      }
+
+      return StatusTuple(0);
+    }
+
+StatusTuple BPFTable::clear() {
+  return BPFTable::clear_table_non_atomic();
 }
 
 size_t BPFTable::get_possible_cpu_count() { return get_possible_cpus().size(); }
@@ -687,6 +860,35 @@ StatusTuple BPFXskmapTable::remove_value(const int& index) {
     if (!this->remove(const_cast<int*>(&index)))
       return StatusTuple(-1, "Error removing value: %s", std::strerror(errno));
     return StatusTuple::OK();
+}
+
+BPFArrayOfMapTable::BPFArrayOfMapTable(const TableDesc& desc)
+    : BPFMapInMapTable(desc) {
+    if(desc.type != BPF_MAP_TYPE_ARRAY_OF_MAPS)
+      throw std::invalid_argument("Table '" + desc.name +
+                                  "' is not an array-of-map table");
+}
+
+StatusTuple BPFArrayOfMapTable::get_value(const int& index, int& value) {
+  if (!this->lookup(const_cast<int*>(&index), get_value_addr(value)))
+    return StatusTuple(-1, "Error getting value: %s", std::strerror(errno));
+  return StatusTuple::OK();
+}
+
+int BPFArrayOfMapTable::operator[](const int& key) {
+  int value;
+  get_value(key, value);
+  return value;
+}
+
+std::vector<int> BPFArrayOfMapTable::get_table_offline() {
+  std::vector<int> res(this->capacity());
+
+  for (int i = 0; i < (int)this->capacity(); i++) {
+    get_value(i, res[i]);
+  }
+
+  return res;
 }
 
 BPFSockmapTable::BPFSockmapTable(const TableDesc& desc)

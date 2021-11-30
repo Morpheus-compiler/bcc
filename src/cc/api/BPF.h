@@ -21,6 +21,13 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
+#include <spdlog/spdlog.h>
+#include <iostream>
+#include <iomanip>
 
 #include "BPFTable.h"
 #include "bcc_exception.h"
@@ -29,6 +36,7 @@
 #include "linux/bpf.h"
 #include "libbpf.h"
 #include "table_storage.h"
+#include "passes/MorpheusCompiler.h"
 
 static const int DEFAULT_PERF_BUFFER_PAGE_CNT = 8;
 
@@ -49,11 +57,25 @@ class BPF {
   explicit BPF(unsigned int flag = 0, TableStorage* ts = nullptr,
                bool rw_engine_enabled = bpf_module_rw_engine_enabled(),
                const std::string &maps_ns = "",
-               bool allow_rlimit = true)
+               bool allow_rlimit = true, const ebpf::BPF *other = nullptr, bool dynamic_opt_enabled = false,
+               std::function<bool(int)> &&dynamic_opt_callback = nullptr)
       : flag_(flag),
-        bsymcache_(NULL),
-        bpf_module_(new BPFModule(flag, ts, rw_engine_enabled, maps_ns,
-                    allow_rlimit)) {}
+        bsymcache_(nullptr),
+        dynamic_opt_enabled_(dynamic_opt_enabled && DYN_COMPILER_ENABLE_RUNTIME_OPTS),
+        bpf_module_(new BPFModule(flag, ts, rw_engine_enabled, dynamic_opt_enabled_,
+                                  maps_ns, allow_rlimit,
+                                  other == nullptr ? "" : other->bpf_module_->id())) {
+    if (dynamic_opt_enabled_) {
+      auto &dynamic_compiler = MorpheusCompiler::getInstance();
+      dynamic_compiler.logger->info("[BPF] Enabling Morpheus optimizations");
+      quit_thread_ = false;
+      opt_ready_ = false;
+      if (dynamic_opt_callback) {
+        dynamic_opt_callback_ = std::forward<std::function<bool(int)>>(dynamic_opt_callback);
+      }
+    }
+  }
+  
   StatusTuple init(const std::string& bpf_program,
                    const std::vector<std::string>& cflags = {},
                    const std::vector<USDT>& usdt = {});
@@ -247,8 +269,9 @@ class BPF {
   int poll_perf_buffer(const std::string& name, int timeout_ms = -1);
 
   StatusTuple load_func(const std::string& func_name, enum bpf_prog_type type,
-                        int& fd, unsigned flags = 0);
+                        int& fd, bool force_loading = false, unsigned flags = 0);
   StatusTuple unload_func(const std::string& func_name);
+  StatusTuple unload_func(const int &fd);
 
   StatusTuple attach_func(int prog_fd, int attachable_fd,
                           enum bpf_attach_type attach_type,
@@ -257,6 +280,8 @@ class BPF {
                           enum bpf_attach_type attach_type);
 
   int free_bcc_memory();
+
+  void enable_morpheus();
 
  private:
   std::string get_kprobe_event(const std::string& kernel_func,
@@ -309,14 +334,20 @@ class BPF {
                                   uint64_t& offset_res,
                                   uint64_t symbol_offset = 0);
 
-  void init_fail_reset();
-
+  void init_fail_reset();  
+  void optimization_thread_main();
+  void callback_update_guard(MorpheusCompiler::map_event event, int map_fd);
+  
   int flag_;
 
   void *bsymcache_;
 
   std::unique_ptr<std::string> syscall_prefix_;
 
+  std::atomic<bool> quit_thread_;
+  std::atomic<bool> opt_ready_;
+  std::atomic<bool> dynamic_opt_enabled_;
+  
   std::unique_ptr<BPFModule> bpf_module_;
 
   std::map<std::string, int> funcs_;
@@ -331,6 +362,15 @@ class BPF {
   std::map<std::string, BPFPerfBuffer*> perf_buffers_;
   std::map<std::string, BPFPerfEventArray*> perf_event_arrays_;
   std::map<std::pair<uint32_t, uint32_t>, open_probe_t> perf_events_;
+  std::thread optimization_thread_;
+  std::string dynamic_opt_func_name_;
+  bpf_prog_type dynamic_opt_prog_type_;
+  std::function<bool(int)> dynamic_opt_callback_;
+  std::mutex opt_mutex_;  // blocks operations when optimizations are running
+  std::mutex opt_enable_opt_mutex_;
+  std::condition_variable cv_enable_opt;
+  //std::unique_ptr<MorpheusCompiler> dynamic_compiler_;
+  int dynamic_callback_id_;
 };
 
 class USDT {

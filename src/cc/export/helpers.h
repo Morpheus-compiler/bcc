@@ -46,7 +46,9 @@ R"********(
 #if defined(CONFIG_FUNCTION_TRACER)
 #define CC_USING_FENTRY
 #endif
+#define asm_volatile_goto(x...) asm volatile("invalid use of asm_volatile_goto")
 
+#include <linux/jhash.h>
 #include <uapi/linux/bpf.h>
 #include <uapi/linux/if_packet.h>
 #include <linux/version.h>
@@ -63,6 +65,8 @@ R"********(
 #define BPF_MAX_STACK_DEPTH 127
 #endif
 
+#define ANNOT(s) __attribute__ ((annotate(s)))
+
 /* helper macro to place programs, maps, license in
  * different sections in elf_bpf file. Section names
  * are interpreted by elf_bpf loader
@@ -70,13 +74,22 @@ R"********(
 #define BCC_SEC(NAME) __attribute__((section(NAME), used))
 
 // Associate map with its key/value types
-#define BPF_ANNOTATE_KV_PAIR(name, type_key, type_val)	\
-        struct ____btf_map_##name {			\
-                type_key key;				\
-                type_val value;				\
-        };						\
-        struct ____btf_map_##name			\
-        __attribute__ ((section(".maps." #name), used))	\
+#define BPF_ANNOTATE_KV_PAIR(name, type_key, type_val)  \
+        struct ____btf_map_##name {     \
+                type_key key;       \
+                type_val value;       \
+        };            \
+        struct ____btf_map_##name     \
+        __attribute__ ((section(".maps." #name), used)) \
+                ____btf_map_##name = { }
+
+// Associate map with its key/value types for QUEUE/STACK map types
+#define BPF_ANNOTATE_KV_PAIR_QUEUESTACK(name, type_val)  \
+        struct ____btf_map_##name {     \
+                type_val value;       \
+        };            \
+        struct ____btf_map_##name     \
+        __attribute__ ((section(".maps." #name), used)) \
                 ____btf_map_##name = { }
 
 // Associate map with its key/value types for QUEUE/STACK map types
@@ -89,11 +102,12 @@ R"********(
                 ____btf_map_##name = { }
 
 // Changes to the macro require changes in BFrontendAction classes
-#define BPF_F_TABLE(_table_type, _key_type, _leaf_type, _name, _max_entries, _flags) \
+#define BPF_F_TABLE(_table_type, _key_type, _leaf_type, _name, _max_entries, _flags, _read_only) \
 struct _name##_table_t { \
   _key_type key; \
   _leaf_type leaf; \
   _leaf_type * (*lookup) (_key_type *); \
+  _leaf_type * (*lookup_skip_opt) (_key_type *); \
   _leaf_type * (*lookup_or_init) (_key_type *, _leaf_type *); \
   _leaf_type * (*lookup_or_try_init) (_key_type *, _leaf_type *); \
   int (*update) (_key_type *, _leaf_type *); \
@@ -103,11 +117,14 @@ struct _name##_table_t { \
   void (*increment) (_key_type, ...); \
   void (*atomic_increment) (_key_type, ...); \
   int (*get_stackid) (void *, u64); \
+  u64 (*redirect_map) (int, int); \
+  u64 (*get_table_ptr) (int); \
   u32 max_entries; \
   int flags; \
+  u8  read_only; \
 }; \
 __attribute__((section("maps/" _table_type))) \
-struct _name##_table_t _name = { .flags = (_flags), .max_entries = (_max_entries) }; \
+struct _name##_table_t _name = { .flags = (_flags), .max_entries = (_max_entries), .read_only = (_read_only) }; \
 BPF_ANNOTATE_KV_PAIR(_name, _key_type, _leaf_type)
 
 
@@ -154,9 +171,14 @@ struct _name##_table_t __##_name
 BPF_QUEUESTACK(_table_type, _name, _leaf_type, _max_entries, _flags); \
 __attribute__((section("maps/shared"))) \
 struct _name##_table_t __##_name
+#define BPF_TABLE_RO(_table_type, _key_type, _leaf_type, _name, _max_entries, _read_only) \
+BPF_F_TABLE(_table_type, _key_type, _leaf_type, _name, _max_entries, 0, _read_only)
 
 #define BPF_TABLE(_table_type, _key_type, _leaf_type, _name, _max_entries) \
-BPF_F_TABLE(_table_type, _key_type, _leaf_type, _name, _max_entries, 0)
+BPF_F_TABLE(_table_type, _key_type, _leaf_type, _name, _max_entries, 0, 0)
+
+#define BPF_TABLE_PINNED(_table_type, _key_type, _leaf_type, _name, _max_entries, _pinned) \
+BPF_TABLE(_table_type ":" _pinned, _key_type, _leaf_type, _name, _max_entries)
 
 #define BPF_TABLE_PINNED(_table_type, _key_type, _leaf_type, _name, _max_entries, _pinned) \
 BPF_TABLE(_table_type ":" _pinned, _key_type, _leaf_type, _name, _max_entries)
@@ -165,6 +187,12 @@ BPF_TABLE(_table_type ":" _pinned, _key_type, _leaf_type, _name, _max_entries)
 #define BPF_TABLE_PUBLIC(_table_type, _key_type, _leaf_type, _name, _max_entries) \
 BPF_TABLE(_table_type, _key_type, _leaf_type, _name, _max_entries); \
 __attribute__((section("maps/export"))) \
+struct _name##_table_t __##_name
+
+// define a table that is shared across the programs in the same namespace
+#define BPF_TABLE_SHARED_RO(_table_type, _key_type, _leaf_type, _name, _max_entries, _read_only) \
+BPF_TABLE_RO(_table_type, _key_type, _leaf_type, _name, _max_entries, _read_only); \
+__attribute__((section("maps/shared"))) \
 struct _name##_table_t __##_name
 
 // define a table that is shared across the programs in the same namespace
@@ -321,13 +349,13 @@ struct _name##_table_t _name = { .max_entries = (_max_entries) }
   BPF_HISTX(__VA_ARGS__, BPF_HIST3, BPF_HIST2, BPF_HIST1)(__VA_ARGS__)
 
 #define BPF_LPM_TRIE1(_name) \
-  BPF_F_TABLE("lpm_trie", u64, u64, _name, 10240, BPF_F_NO_PREALLOC)
+  BPF_F_TABLE("lpm_trie", u64, u64, _name, 10240, BPF_F_NO_PREALLOC, 0)
 #define BPF_LPM_TRIE2(_name, _key_type) \
-  BPF_F_TABLE("lpm_trie", _key_type, u64, _name, 10240, BPF_F_NO_PREALLOC)
+  BPF_F_TABLE("lpm_trie", _key_type, u64, _name, 10240, BPF_F_NO_PREALLOC, 0)
 #define BPF_LPM_TRIE3(_name, _key_type, _leaf_type) \
-  BPF_F_TABLE("lpm_trie", _key_type, _leaf_type, _name, 10240, BPF_F_NO_PREALLOC)
+  BPF_F_TABLE("lpm_trie", _key_type, _leaf_type, _name, 10240, BPF_F_NO_PREALLOC, 0)
 #define BPF_LPM_TRIE4(_name, _key_type, _leaf_type, _size) \
-  BPF_F_TABLE("lpm_trie", _key_type, _leaf_type, _name, _size, BPF_F_NO_PREALLOC)
+  BPF_F_TABLE("lpm_trie", _key_type, _leaf_type, _name, _size, BPF_F_NO_PREALLOC, 0)
 #define BPF_LPM_TRIEX(_1, _2, _3, _4, NAME, ...) NAME
 
 // Define a LPM trie function, some arguments optional
@@ -347,7 +375,7 @@ struct bpf_stacktrace_buildid {
   BPF_TABLE("stacktrace", int, struct bpf_stacktrace, _name, roundup_pow_of_two(_max_entries))
 
 #define BPF_STACK_TRACE_BUILDID(_name, _max_entries) \
-  BPF_F_TABLE("stacktrace", int, struct bpf_stacktrace_buildid, _name, roundup_pow_of_two(_max_entries), BPF_F_STACK_BUILD_ID)
+  BPF_F_TABLE("stacktrace", int, struct bpf_stacktrace_buildid, _name, roundup_pow_of_two(_max_entries), BPF_F_STACK_BUILD_ID, 0)
 
 #define BPF_PROG_ARRAY(_name, _max_entries) \
   BPF_TABLE("prog", u32, u32, _name, _max_entries)
@@ -1083,10 +1111,35 @@ void bpf_dins_pkt(void *pkt, u64 off, u64 bofs, u64 bsz, u64 val) {
   }
 }
 
-static inline __attribute__((always_inline))
+//static inline __attribute__((always_inline))
+static
 BCC_SEC("helpers")
 void * bpf_map_lookup_elem_(uintptr_t map, void *key) {
   return bpf_map_lookup_elem((void *)map, key);
+}
+
+static
+BCC_SEC("helpers")
+void * _bpf_map_lookup_elem(uintptr_t map, void *key) {
+  return bpf_map_lookup_elem((void *)map, key);
+}
+
+static
+BCC_SEC("helpers")
+void * bpf_map_lookup_or_init_elem_(uintptr_t map, void *key) {
+  void *leaf = bpf_map_lookup_elem((void *)map, key);
+  if (!leaf) {
+    uint64_t zero = 0;
+    bpf_map_update_elem((void *)map, key, (void *)&zero, BPF_NOEXIST);
+    leaf = bpf_map_lookup_elem((void *)map, key);
+  }
+  return leaf;
+}
+
+static
+BCC_SEC("helpers")
+u32 jhash_(const void *key, u32 length, u32 initval) {
+  return jhash(key, length, initval);
 }
 
 static inline __attribute__((always_inline))
@@ -1099,6 +1152,12 @@ static inline __attribute__((always_inline))
 BCC_SEC("helpers")
 int bpf_map_delete_elem_(uintptr_t map, void *key) {
   return bpf_map_delete_elem((void *)map, key);
+}
+
+static inline __attribute__((always_inline))
+BCC_SEC("helpers")
+void * bpf_map_pseudo_fd_(uintptr_t map) {
+  return (void *)map;
 }
 
 static inline __attribute__((always_inline))
@@ -1177,16 +1236,16 @@ int bpf_usdt_readarg_p(int argc, struct pt_regs *ctx, void *buf, u64 len) asm("l
 #endif
 
 #if defined(bpf_target_powerpc)
-#define PT_REGS_PARM1(ctx)	((ctx)->gpr[3])
-#define PT_REGS_PARM2(ctx)	((ctx)->gpr[4])
-#define PT_REGS_PARM3(ctx)	((ctx)->gpr[5])
-#define PT_REGS_PARM4(ctx)	((ctx)->gpr[6])
-#define PT_REGS_PARM5(ctx)	((ctx)->gpr[7])
-#define PT_REGS_PARM6(ctx)	((ctx)->gpr[8])
-#define PT_REGS_RC(ctx)		((ctx)->gpr[3])
-#define PT_REGS_IP(ctx)		((ctx)->nip)
-#define PT_REGS_SP(ctx)		((ctx)->gpr[1])
-#elif defined(bpf_target_s390x)
+#define PT_REGS_PARM1(ctx)  ((ctx)->gpr[3])
+#define PT_REGS_PARM2(ctx)  ((ctx)->gpr[4])
+#define PT_REGS_PARM3(ctx)  ((ctx)->gpr[5])
+#define PT_REGS_PARM4(ctx)  ((ctx)->gpr[6])
+#define PT_REGS_PARM5(ctx)  ((ctx)->gpr[7])
+#define PT_REGS_PARM6(ctx)  ((ctx)->gpr[8])
+#define PT_REGS_RC(ctx)   ((ctx)->gpr[3])
+#define PT_REGS_IP(ctx)   ((ctx)->nip)
+#define PT_REGS_SP(ctx)   ((ctx)->gpr[1])
+#elif defined(bpf_target_s930x)
 #define PT_REGS_PARM1(x) ((x)->gprs[2])
 #define PT_REGS_PARM2(x) ((x)->gprs[3])
 #define PT_REGS_PARM3(x) ((x)->gprs[4])
@@ -1198,17 +1257,17 @@ int bpf_usdt_readarg_p(int argc, struct pt_regs *ctx, void *buf, u64 len) asm("l
 #define PT_REGS_SP(x) ((x)->gprs[15])
 #define PT_REGS_IP(x) ((x)->psw.addr)
 #elif defined(bpf_target_x86)
-#define PT_REGS_PARM1(ctx)	((ctx)->di)
-#define PT_REGS_PARM2(ctx)	((ctx)->si)
-#define PT_REGS_PARM3(ctx)	((ctx)->dx)
-#define PT_REGS_PARM4(ctx)	((ctx)->cx)
-#define PT_REGS_PARM5(ctx)	((ctx)->r8)
-#define PT_REGS_PARM6(ctx)	((ctx)->r9)
-#define PT_REGS_RET(ctx)	((ctx)->sp)
-#define PT_REGS_FP(ctx)         ((ctx)->bp) /* Works only with CONFIG_FRAME_POINTER */
-#define PT_REGS_RC(ctx)		((ctx)->ax)
-#define PT_REGS_IP(ctx)		((ctx)->ip)
-#define PT_REGS_SP(ctx)		((ctx)->sp)
+#define PT_REGS_PARM1(ctx)  ((ctx)->di)
+#define PT_REGS_PARM2(ctx)  ((ctx)->si)
+#define PT_REGS_PARM3(ctx)  ((ctx)->dx)
+#define PT_REGS_PARM4(ctx)  ((ctx)->cx)
+#define PT_REGS_PARM5(ctx)  ((ctx)->r8)
+#define PT_REGS_PARM6(ctx)  ((ctx)->r9)
+#define PT_REGS_RET(ctx)    ((ctx)->sp)
+#define PT_REGS_FP(ctx)     ((ctx)->bp) /* Works only with CONFIG_FRAME_POINTER */
+#define PT_REGS_RC(ctx)   ((ctx)->ax)
+#define PT_REGS_IP(ctx)   ((ctx)->ip)
+#define PT_REGS_SP(ctx)   ((ctx)->sp)
 #elif defined(bpf_target_arm64)
 #define PT_REGS_PARM1(x)	((x)->regs[0])
 #define PT_REGS_PARM2(x)	((x)->regs[1])

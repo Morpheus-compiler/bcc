@@ -38,6 +38,9 @@ enum bpf_probe_attach_type {
 int bcc_create_map(enum bpf_map_type map_type, const char *name,
                    int key_size, int value_size, int max_entries,
                    int map_flags);
+int bcc_create_map_node(enum bpf_map_type map_type, const char *name,
+                   int key_size, int value_size, int max_entries,
+                   int map_flags, int node);
 int bcc_create_map_xattr(struct bpf_create_map_attr *attr, bool allow_rlimit);
 int bpf_update_elem(int fd, void *key, void *value, unsigned long long flags);
 int bpf_lookup_elem(int fd, void *key, void *value);

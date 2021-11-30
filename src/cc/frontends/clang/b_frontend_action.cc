@@ -18,6 +18,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <iostream>
 
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/ASTContext.h>
@@ -874,12 +875,10 @@ bool BTypeVisitor::VisitCallExpr(CallExpr *Call) {
         Path local_path({fe_.id(), string(Ref->getDecl()->getName())});
         Path global_path({string(Ref->getDecl()->getName())});
         if (!fe_.table_storage().Find(local_path, desc)) {
-          if (!fe_.table_storage().Find(global_path, desc)) {
-            error(GET_ENDLOC(Ref), "bpf_table %0 failed to open") << Ref->getDecl()->getName();
-            return false;
-          }
+          error(GET_ENDLOC(Ref), "bpf_table %0 failed to open") << Ref->getDecl()->getName();
+          return false;
         }
-        string fd = to_string(desc->second.fd >= 0 ? desc->second.fd : desc->second.fake_fd);
+        const string fd = to_string(desc->second.fd >= 0 ? desc->second.fd : desc->second.fake_fd);
         string prefix, suffix;
         string txt;
         auto rewrite_start = GET_BEGINLOC(Call);
@@ -1034,6 +1033,8 @@ bool BTypeVisitor::VisitCallExpr(CallExpr *Call) {
             }
             fe_.perf_events_[name] = perf_event;
           }
+        } else if (memb_name == "get_table_ptr") {
+          txt = "bpf_map_pseudo_fd_(bpf_pseudo_fd(1, " + fd + "))";
         } else if (memb_name == "msg_redirect_hash" || memb_name == "sk_redirect_hash") {
           string arg0 = rewriter_.getRewrittenText(expansionRange(Call->getArg(0)->getSourceRange()));
           string args_other = rewriter_.getRewrittenText(expansionRange(SourceRange(GET_BEGINLOC(Call->getArg(1)),
@@ -1043,19 +1044,22 @@ bool BTypeVisitor::VisitCallExpr(CallExpr *Call) {
           txt += args_other + ")";
         } else {
           if (memb_name == "lookup") {
-            prefix = "bpf_map_lookup_elem";
+            prefix = "bpf_map_lookup_elem_";
+            suffix = ")";
+          } else if (memb_name == "lookup_skip_opt") {
+            prefix = "_bpf_map_lookup_elem";
             suffix = ")";
           } else if (memb_name == "update") {
-            prefix = "bpf_map_update_elem";
+            prefix = "bpf_map_update_elem_";
             suffix = ", BPF_ANY)";
           } else if (memb_name == "insert") {
             if (desc->second.type == BPF_MAP_TYPE_ARRAY) {
               warning(GET_BEGINLOC(Call), "all element of an array already exist; insert() will have no effect");
             }
-            prefix = "bpf_map_update_elem";
+            prefix = "bpf_map_update_elem_";
             suffix = ", BPF_NOEXIST)";
           } else if (memb_name == "delete") {
-            prefix = "bpf_map_delete_elem";
+            prefix = "bpf_map_delete_elem_";
             suffix = ")";
           } else if (memb_name == "call") {
             prefix = "bpf_tail_call_";
@@ -1370,9 +1374,10 @@ bool BTypeVisitor::VisitVarDecl(VarDecl *Decl) {
     TableStorage::iterator table_it;
     table.name = string(Decl->getName());
     Path local_path({fe_.id(), table.name});
-    Path maps_ns_path({"ns", fe_.maps_ns(), table.name});
+    Path maps_ns_path({fe_.maps_ns(), table.name});
     Path global_path({table.name});
     QualType key_type, leaf_type;
+    bool try_to_steal = (fe_.other_id() != "");
 
     unsigned i = 0;
     for (auto F : RD->fields()) {
@@ -1400,6 +1405,12 @@ bool BTypeVisitor::VisitVarDecl(VarDecl *Decl) {
             table.max_entries = getFieldValue(Decl, F, table.max_entries);
       } else if (F->getName() == "flags") {
             table.flags = getFieldValue(Decl, F, table.flags);
+      } else if (F->getName() == "read_only") {
+            auto is_read_only = getFieldValue(Decl, F, table.is_read_only);
+            if (is_read_only != 0 && is_read_only != 1) {
+              error(GET_BEGINLOC(F), "invalid is_read_only flag");
+            }
+            table.is_read_only = static_cast<bool>(is_read_only);
       }
       ++i;
     }
@@ -1533,22 +1544,54 @@ bool BTypeVisitor::VisitVarDecl(VarDecl *Decl) {
         error(GET_BEGINLOC(Decl), "reference to undefined table");
         return false;
       }
+      table_it->second.is_shared = true;
+      if (fe_.table_storage().Find(global_path, table_it)) {
+        if (try_to_steal) {
+          Path other_id_path({fe_.other_id(), table.name});
+          fe_.table_storage().Find(other_id_path, table_it);
+          table_it->second.is_shared = false; // it is not shared on that one.
+          return true;
+        }
+        error(GET_BEGINLOC(Decl), "table already exists");
+        return false;
+      }
       fe_.table_storage().Insert(global_path, table_it->second.dup());
       return true;
     } else if(section_attr == "maps/shared") {
       if (table.name.substr(0, 2) == "__")
         table.name = table.name.substr(2);
       Path local_path({fe_.id(), table.name});
-      Path maps_ns_path({"ns", fe_.maps_ns(), table.name});
+      Path maps_ns_path({fe_.maps_ns(), table.name});
       if (!fe_.table_storage().Find(local_path, table_it)) {
         error(GET_BEGINLOC(Decl), "reference to undefined table");
+        return false;
+      }
+      table_it->second.is_shared = true;
+      if (fe_.table_storage().Find(maps_ns_path, table_it)) {
+        if (try_to_steal) {
+          Path other_id_path({fe_.other_id(), table.name});
+          fe_.table_storage().Find(other_id_path, table_it);
+          table_it->second.is_shared = false; // it is not shared on that one.
+          return true;
+        }
+        error(GET_BEGINLOC(Decl), "table already exists");
         return false;
       }
       fe_.table_storage().Insert(maps_ns_path, table_it->second.dup());
       return true;
     }
 
-    if (!table.is_extern) {
+    bool steal = false;
+
+    // should I try to steal maps?
+    if (try_to_steal) {
+      Path other_id_path({fe_.other_id(), table.name});
+      if (fe_.table_storage().Find(other_id_path, table_it)) {
+        table = table_it->second.dup();
+        steal = true; // steal it: don't create a new one
+      }
+    }
+    if (!table.is_extern && !steal) {
       if (map_type == BPF_MAP_TYPE_UNSPEC) {
         error(GET_BEGINLOC(Decl), "unsupported map type: %0") << section_attr;
         return false;
@@ -1562,7 +1605,7 @@ bool BTypeVisitor::VisitVarDecl(VarDecl *Decl) {
                       inner_map_name, pinned));
     }
 
-    if (!table.is_extern)
+    if (!table.is_extern && !steal)
       fe_.table_storage().VisitMapType(table, C, key_type, leaf_type);
     fe_.table_storage().Insert(local_path, move(table));
   } else if (const PointerType *P = Decl->getType()->getAs<PointerType>()) {
@@ -1676,17 +1719,19 @@ BFrontendAction::BFrontendAction(llvm::raw_ostream &os, unsigned flags,
                                  FuncSource &func_src, std::string &mod_src,
                                  const std::string &maps_ns,
                                  fake_fd_map_def &fake_fd_map,
-                                 std::map<std::string, std::vector<std::string>> &perf_events)
+                                 std::map<std::string, std::vector<std::string>> &perf_events,
+                                 const std::string &other_id)
     : os_(os),
       flags_(flags),
       ts_(ts),
       id_(id),
+      other_id_(other_id),
       maps_ns_(maps_ns),
       rewriter_(new Rewriter),
       main_path_(main_path),
       func_src_(func_src),
       mod_src_(mod_src),
-      next_fake_fd_(-1),
+      next_fake_fd_(-10),
       fake_fd_map_(fake_fd_map),
       perf_events_(perf_events) {}
 

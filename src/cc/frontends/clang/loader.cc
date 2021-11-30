@@ -31,6 +31,10 @@
 #include <vector>
 #include <iostream>
 #include <linux/bpf.h>
+#include <fstream>
+#include <iomanip>
+#include <ctime>
+#include <sstream>
 
 #include <clang/Basic/FileManager.h>
 #include <clang/Basic/TargetInfo.h>
@@ -123,7 +127,8 @@ int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
                        std::string &mod_src,
                        const std::string &maps_ns,
                        fake_fd_map_def &fake_fd_map,
-                       std::map<std::string, std::vector<std::string>> &perf_events) {
+                       std::map<std::string, std::vector<std::string>> &perf_events,
+                       const std::string &other_id) {
   string main_path = "/virtual/main.c";
   unique_ptr<llvm::MemoryBuffer> main_buf;
   struct utsname un;
@@ -184,12 +189,15 @@ int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
   // It can be removed once clang supports asm-goto or the kernel removes
   // the warning.
   vector<const char *> flags_cstr({"-O0", "-O2", "-emit-llvm", "-I", dstack.cwd(),
-                                   "-D", "__BPF_TRACING__",
+                                   "-D", "__BPF_TRACING__", "-g",
                                    "-Wno-deprecated-declarations",
                                    "-Wno-gnu-variable-sized-type-not-at-end",
                                    "-Wno-pragma-once-outside-header",
                                    "-Wno-address-of-packed-member",
                                    "-Wno-unknown-warning-option",
+                                   "-Wno-builtin-macro-redefined",
+                                   "-Wno-compare-distinct-pointer-types",
+                                   "-Wno-macro-redefined",
                                    "-fno-color-diagnostics",
                                    "-fno-unwind-tables",
                                    "-fno-asynchronous-unwind-tables",
@@ -242,7 +250,7 @@ int ClangLoader::parse(unique_ptr<llvm::Module> *mod, TableStorage &ts,
 #endif
 
   if (do_compile(mod, ts, in_memory, flags_cstr, flags_cstr_rem, main_path,
-                 main_buf, id, func_src, mod_src, true, maps_ns, fake_fd_map, perf_events)) {
+                 main_buf, id, func_src, mod_src, true, maps_ns, fake_fd_map, perf_events, other_id)) {
 #if BCC_BACKUP_COMPILE != 1
     return -1;
 #else
@@ -306,7 +314,8 @@ int ClangLoader::do_compile(unique_ptr<llvm::Module> *mod, TableStorage &ts,
                             std::string &mod_src, bool use_internal_bpfh,
                             const std::string &maps_ns,
                             fake_fd_map_def &fake_fd_map,
-                            std::map<std::string, std::vector<std::string>> &perf_events) {
+                            std::map<std::string, std::vector<std::string>> &perf_events,
+                            const std::string &other_id) {
   using namespace clang;
 
   vector<const char *> flags_cstr = flags_cstr_in;
@@ -398,6 +407,17 @@ int ClangLoader::do_compile(unique_ptr<llvm::Module> *mod, TableStorage &ts,
   compiler0.ExecuteAction(tpact); // ignore errors, they will be reported later
   unique_ptr<llvm::MemoryBuffer> out_buf = llvm::MemoryBuffer::getMemBuffer(out_str);
 
+  // auto t = std::time(nullptr);
+  // auto tm = *std::localtime(&t);
+  
+  // {
+  //   std::ostringstream oss;
+  //   oss << std::put_time(&tm, "/home/smiano/dev/polycube-private/build/file%H-%M-%S.txt");
+  //   auto fileName = oss.str();
+  //   std::ofstream out(fileName);
+  //   out << out_str;
+  // }
+
   // first pass
   CompilerInstance compiler1;
   CompilerInvocation &invocation1 = compiler1.getInvocation();
@@ -424,10 +444,18 @@ int ClangLoader::do_compile(unique_ptr<llvm::Module> *mod, TableStorage &ts,
   string out_str1;
   llvm::raw_string_ostream os1(out_str1);
   BFrontendAction bact(os1, flags_, ts, id, main_path, func_src, mod_src,
-                       maps_ns, fake_fd_map, perf_events);
+                       maps_ns, fake_fd_map, perf_events, other_id);
   if (!compiler1.ExecuteAction(bact))
     return -1;
   unique_ptr<llvm::MemoryBuffer> out_buf1 = llvm::MemoryBuffer::getMemBuffer(out_str1);
+
+  // {
+  //   std::ostringstream oss;
+  //   oss << std::put_time(&tm, "/home/smiano/dev/polycube-private/build/file%H-%M-%S_1.txt");
+  //   auto fileName = oss.str();
+  //   std::ofstream out(fileName);
+  //   out << out_str;
+  // }
 
   // second pass, clear input and take rewrite buffer
   CompilerInstance compiler2;
