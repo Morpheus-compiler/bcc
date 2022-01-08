@@ -80,7 +80,7 @@ RUN mkdir -p /bison-3.8 && \
 RUN git clone --depth 1 --branch yaml-cpp-0.7.0 https://github.com/jbeder/yaml-cpp.git && \
     cd yaml-cpp && \
     mkdir build && cd build && \
-    cmake .. -YAML_BUILD_SHARED_LIBS=on && make -j && make install && \
+    cmake .. -DYAML_BUILD_SHARED_LIBS=on && make -j && make install && \
     cd ../.. && rm -rf yaml-cpp
 
 RUN wget -O ruby-install-0.7.0.tar.gz \
