@@ -507,7 +507,7 @@ createPhi:
         helperInstruction->setMetadata("opt.hasBeenProcessed", N);
 
         if (values.size() <= CaseValues.size() && table->is_read_only && dynamic_opt_compiler.isMapROAcrossModules(table->fd) && table->type != BPF_MAP_TYPE_LPM_TRIE) {
-          spdlog::get("Morpheus")->info("Performing DCE for this table, since the entries are small.");
+          spdlog::get("Morpheus")->info("[JIT Pass] Performing DCE for this table, since the entries are small.");
           /*
             * This is for the dead code elimination.
             * I remove all the instructions (that are already dead)
@@ -580,7 +580,7 @@ std::vector<std::string> JITTableRuntimePass::getEntriesFromInstrumentedMap(int 
 
     StatusTuple rc = table.get_table_offline_percpu(values);
     if (rc.code() != 0) {
-      spdlog::get("Morpheus")->error("Error while reading instrumented map: {}", rc.msg());
+      spdlog::get("Morpheus")->error("[JIT Pass] Error while reading instrumented map: {}", rc.msg());
     }
 
     if (values.size() == 0) {
@@ -685,7 +685,7 @@ int JITTableRuntimePass::createGuardMap(TableDesc &original_map) {
 
   fd = bcc_create_map_xattr(&attr, true);
   if (fd < 0) {
-    spdlog::get("Morpheus")->error("could not open bpf map: {}, error: {}", map_name, strerror(errno));
+    spdlog::get("Morpheus")->error("[JIT Pass] could not open bpf map: {}, error: {}", map_name, strerror(errno));
     return -1;
   }
 
@@ -980,14 +980,14 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
   std::string value_copy = value.second;
   value_copy.erase(std::remove(value_copy.begin(), value_copy.end(), '"'), value_copy.end());
   if (value.second.empty() || value_copy.empty()) {
-    spdlog::get("Morpheus")->trace("[JITTableRuntimePass] Setting value pointer to NULL for entry: {}", value.first);
+    spdlog::get("Morpheus")->trace("[JIT Pass] Setting value pointer to NULL for entry: {}", value.first);
     // Table for that key is empty
     final_value = ConstantPointerNull::get(llvm::Type::getInt8PtrTy(ctx));
   } else {
     if (structDesc.is_array()) {
       // The leaf is a struct
       std::string tmp_string = getJsonFromLeafValues(value.second);
-      spdlog::get("Morpheus")->trace("[JITTableRuntimePass] The string returned from getJsonFromLeafValues is: {}", tmp_string);
+      spdlog::get("Morpheus")->trace("[JIT Pass] The string returned from getJsonFromLeafValues is: {}", tmp_string);
       auto leaf_value = nlohmann::json::parse(getJsonFromLeafValues(value.second));
       assert(leaf_value.is_array() && "Unexpected format in the leaf values!");
 
@@ -1004,7 +1004,7 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
 
         if (value_name.find("__pad") != std::string::npos ||
             value_type.find("bpf_spin_lock") != std::string::npos) {
-            spdlog::get("Morpheus")->trace("Skip this entry, it is just padding or a bpf_spin_lock");
+            spdlog::get("Morpheus")->trace("[JIT Pass] Skip this entry, it is just padding or a bpf_spin_lock");
             continue;
         }
 
@@ -1015,7 +1015,7 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
         auto gep_value = IRBCase.CreateStructGEP(allocaStruct, i, value_name);
 
         if (structDesc[i].size() == 3 && structDesc[i][2].is_array()) {
-          spdlog::get("Morpheus")->trace("[JITTableRuntimePass] We are inside an array");
+          spdlog::get("Morpheus")->trace("[JIT Pass] We are inside an array");
           // We have an array in this case as an entry in the struct
           //unsigned int array_size = structDesc[i][2][0];
           std::vector<Constant *> vect;
@@ -1031,7 +1031,7 @@ std::pair<Value *, BasicBlock *> JITTableRuntimePass::createCaseBlockForEntry(LL
             std::string original_string = leaf_value[j].get<std::string>();
             string_to_offload.replace(0, original_string.length(), original_string);
             // We have a string to allocate
-            spdlog::get("Morpheus")->trace("[JITTableRuntimePass] We need to allocate a string of size {} in this case: {}", string_to_offload.length(), string_to_offload);
+            spdlog::get("Morpheus")->trace("[JIT Pass] We need to allocate a string of size {} in this case: {}", string_to_offload.length(), string_to_offload);
 
             std::vector<llvm::Constant *> chars(string_to_offload.size());
             for(unsigned int i = 0; i < string_to_offload.size(); i++) {

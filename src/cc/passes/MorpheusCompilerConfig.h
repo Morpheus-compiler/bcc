@@ -19,6 +19,10 @@
 #pragma once
 
 #include <yaml-cpp/yaml.h>
+#include <spdlog/spdlog.h>
+#include <ranges>
+#include <algorithm>
+#include <string>
 
 // This flag is use to enable or disable the runtime optimization.
 // If set to 0 no optimization is applied to the programs.
@@ -122,7 +126,62 @@ namespace ebpf {
         unsigned int optimizer_timeout = DYNAMIC_OPTIMIZER_TIMEOUT;
         unsigned int optimizer_timeout_init = DYNAMIC_OPTIMIZED_TIMEOUT_INIT;
         unsigned int optimizer_timeout_steps = DYNAMIC_OPTIMIZER_TIMEOUT_STEPS;
+        spdlog::level::level_enum log_level = spdlog::level::info;
     };
+
+    static std::string level_names[]{"TRACE","DEBUG","INFO","WARN","ERR","CRITICAL","OFF"};
+
+    static bool iequals(const std::string& a, const std::string& b)
+    {
+        return std::equal(a.begin(), a.end(),
+                          b.begin(), b.end(),
+                          [](char a, char b) {
+                              return tolower(a) == tolower(b);
+                          });
+    }
+
+    static std::string logLevelToString(spdlog::level::level_enum l) {
+      switch (l) {
+        case spdlog::level::trace:
+          return level_names[0];
+        case spdlog::level::debug:
+          return level_names[1];
+        case spdlog::level::info:
+          return level_names[2];
+        case spdlog::level::warn:
+          return level_names[3];
+        case spdlog::level::err:
+          return level_names[4];
+        case spdlog::level::critical:
+          return level_names[5];
+        case spdlog::level::off:
+          return level_names[6];
+        default:
+          return level_names[2];
+      }
+
+      return level_names[2];
+    }
+
+    static spdlog::level::level_enum stringToLogLevel(const std::string &l) {
+      if (ebpf::iequals(l, "trace")) {
+        return spdlog::level::trace;
+      } else if (ebpf::iequals(l, "debug")) {
+        return spdlog::level::debug;
+      } else if (ebpf::iequals(l, "info")) {
+        return spdlog::level::info;
+      } else if (ebpf::iequals(l, "warn")) {
+        return spdlog::level::warn;
+      } else if (ebpf::iequals(l, "err")) {
+        return spdlog::level::err;
+      } else if (ebpf::iequals(l, "critical")) {
+        return spdlog::level::critical;
+      } else if (ebpf::iequals(l, "off")) {
+        return spdlog::level::off;
+      } else {
+        return spdlog::level::info;
+      }
+    }
 }
 
 namespace YAML {
@@ -144,6 +203,7 @@ struct convert<ebpf::MorpheusConfigStruct> {
     node["optimizer_timeout"] = rhs.optimizer_timeout;
     node["optimizer_timeout_init"] = rhs.optimizer_timeout_init;
     node["optimizer_timeout_steps"] = rhs.optimizer_timeout_steps;
+    node["log_level"] = ebpf::logLevelToString(rhs.log_level);
     return node;
   }
 
@@ -166,6 +226,7 @@ struct convert<ebpf::MorpheusConfigStruct> {
     rhs.optimizer_timeout = node["optimizer_timeout"].as<unsigned int>();
     rhs.optimizer_timeout_init = node["optimizer_timeout_init"].as<unsigned int>();
     rhs.optimizer_timeout_steps = node["optimizer_timeout_steps"].as<unsigned int>();
+    rhs.log_level = ebpf::stringToLogLevel(node["log_level"].as<std::string>());
     
     return true;
   }

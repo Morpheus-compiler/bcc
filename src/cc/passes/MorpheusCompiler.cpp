@@ -45,8 +45,7 @@ namespace ebpf {
       initlogger();
       read_config_file(CONFIGFILE);
 
-      // TODO: Make it configurable somewhere
-      logger->set_level(spdlog::level::info);
+      logger->set_level(get_config().log_level);
 
       initialized_ = true;
       return 0;
