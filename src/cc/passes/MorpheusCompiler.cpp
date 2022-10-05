@@ -45,6 +45,8 @@ namespace ebpf {
       initlogger();
       read_config_file(CONFIGFILE);
 
+      logger->info("Configuration file loaded");
+
       logger->set_level(get_config().log_level);
 
       initialized_ = true;
@@ -81,7 +83,6 @@ namespace ebpf {
 
       YAML::Node config = YAML::LoadFile(path);
       struct MorpheusConfigStruct readConfig = config["Morpheus"].as<MorpheusConfigStruct>();
-
       config_ = readConfig;
     }
 

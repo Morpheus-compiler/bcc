@@ -38,7 +38,11 @@ jobs:
                    bcc-docker \
                    /bin/bash -c \
                    'mkdir -p /bcc/build && cd /bcc/build && \
-                    cmake -DCMAKE_BUILD_TYPE=${TYPE} -DLLVM_DIR=/clang+llvm10/lib/cmake/llvm .. && make -j9'"
+                    cmake -DCMAKE_BUILD_TYPE=${TYPE} \
+                          -DCMAKE_C_COMPILER=/usr/bin/gcc-10 \
+                          -DCMAKE_CXX_COMPILER=/usr/bin/g++-10 \
+                          -DLLVM_DIR=/clang+llvm10/lib/cmake/llvm .. && \
+                          make -j9'"
     - name: Run bcc's cc tests
       env: ${{ matrix.env }}
       # tests are wrapped with `script` as a hack to get a TTY as github actions doesn't provide this

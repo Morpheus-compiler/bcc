@@ -20,9 +20,9 @@
 
 #include <yaml-cpp/yaml.h>
 #include <spdlog/spdlog.h>
-#include <ranges>
 #include <algorithm>
 #include <string>
+#include <iostream>
 
 // This flag is use to enable or disable the runtime optimization.
 // If set to 0 no optimization is applied to the programs.
@@ -208,7 +208,8 @@ struct convert<ebpf::MorpheusConfigStruct> {
   }
 
   static bool decode(const Node& node, ebpf::MorpheusConfigStruct& rhs) {
-    if(!node.IsMap() || node.size() != 14) {
+    if(!node.IsMap() || node.size() != 15) {
+      std::cout << "Wrong format of YAML configuration file" << std::endl;
       return false;
     }
 
