@@ -27,6 +27,7 @@
 #include <map>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_sinks.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include "MorpheusCompilerConfig.h"
 
 namespace ebpf {
@@ -96,7 +97,7 @@ namespace ebpf {
         std::map<int, struct MapInfo> map_info_;
         unsigned int max_offloaded_entries_;
         bool dynamic_compiler_enabled_;
-        std::shared_ptr<spdlog::sinks::ansicolor_stdout_sink_mt> console;
+        std::shared_ptr<spdlog::sinks::stdout_color_sink_mt> console;
 
         std::map<int, callbackFunc> callback_functions_;
 

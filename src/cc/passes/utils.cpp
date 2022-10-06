@@ -20,6 +20,7 @@
 #include "api/BPFTable.h"
 
 #include <llvm/IR/DebugInfoMetadata.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include "cc/macro_logger.h"
 #include "linux/bpf.h"
@@ -147,6 +148,7 @@ CallInst *getBPFMapLookupCallInst(Instruction &instruction, bool isInstrumentati
   auto nextInstruction = instruction.getNextNonDebugInstruction();
   if (nextInstruction == nullptr) {
     spdlog::get("Morpheus")->trace("[utils] Strange format in the LLVM IR code. Lookup pattern not found!");
+    spdlog::get("Morpheus")->trace("[utils] Not able to find instruction after llvm.bpf.pseudo!");
     return nullptr;
   }
 
@@ -156,6 +158,7 @@ CallInst *getBPFMapLookupCallInst(Instruction &instruction, bool isInstrumentati
 
   if (helperInstruction == nullptr) {
     spdlog::get("Morpheus")->trace("[utils] Strange format in the LLVM IR code. Lookup pattern not found!");
+    spdlog::get("Morpheus")->trace("[utils] Not able to find helper CallInst!");
     return nullptr;
   }
   //assert(helperInstruction != nullptr && "Detected llvm.bpf.pseudo but not the helper instruction");
@@ -209,9 +212,14 @@ CallInst *getBPFMapLookupCallInst(Instruction &instruction, bool isInstrumentati
 
 CallInst *findPseudoFromHelperInstr(Instruction &helperInstruction) {
   auto nextInstruction = helperInstruction.getPrevNonDebugInstruction();
+
   CallInst *pseudoInstruction = nullptr;
   if (nextInstruction == nullptr) {
+    std::string str;
+    llvm::raw_string_ostream(str) << nextInstruction;
     spdlog::get("Morpheus")->trace("[utils] Strange format in the LLVM IR code. Lookup pattern not found!");
+    spdlog::get("Morpheus")->trace("[utils] Not able to find instruction before helper function!");
+    // spdlog::get("Morpheus")->trace("[utils] Instruction: {}!", str);
     return nullptr;
   }
 
@@ -220,7 +228,11 @@ CallInst *findPseudoFromHelperInstr(Instruction &helperInstruction) {
   pseudoInstruction = dyn_cast_or_null<CallInst>(newInstruction);
 
   if (pseudoInstruction == nullptr) {
+    std::string str;
+    llvm::raw_string_ostream(str) << pseudoInstruction;
     spdlog::get("Morpheus")->trace("[utils] Strange format in the LLVM IR code. Lookup pattern not found!");
+    spdlog::get("Morpheus")->trace("[utils] Not able to find instruction that is calling bpf.pseudo!");
+    // spdlog::get("Morpheus")->trace("[utils] Instruction: {}!", str);
     return nullptr;
   }
 

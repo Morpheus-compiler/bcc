@@ -585,7 +585,7 @@ int BPFModule::finalize() {
   if (load_maps(*sections_p))
     return -1;
 
-  //dump_ir_to_file(*mod, "original.bc");
+  // dump_ir_to_file(*mod, "original.bc");
 
   if (!rw_engine_enabled_) {
     // Setup sections_ correctly and then free llvm internal memory

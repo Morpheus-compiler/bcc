@@ -101,6 +101,7 @@ namespace ebpf {
         std::string int_to_hex( T i );
 
         std::vector<std::string> getEntriesFromInstrumentedMap(int originalMapFd, uint max_entries);
+        void deleteAllInstructionsInRange(llvm::LLVMContext &context, llvm::Instruction* startInst, llvm::Instruction* endInst);
         // std::tuple<bool, std::string> parseUnionKeyType(nlohmann::json &keyDesc);
     };
 }

@@ -138,6 +138,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
 
       auto bpfPseudoCallInst = dyn_opt::utils::findPseudoFromHelperInstr(*helperInstruction);
       if (bpfPseudoCallInst == nullptr) {
+        spdlog::get("Morpheus")->trace("[JIT Pass] Is this maybe a map in map instruction?");
         // There is still a case that we have to consider here.
         // When the lookup is a reference to an map obtained from the ARRAY_OF_MAPS.
         // In this case, I read the debug information where I can find the ARRAY_OF_MAP table FD associated
@@ -148,6 +149,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
           spdlog::get("Morpheus")->trace("[JIT Pass] This lookup is referring to a BPF_MAP_IN_MAP with fd: {}", map_in_map_fd);
           bpfPseudoCallInst = helperInstruction;
         } else {
+          spdlog::get("Morpheus")->trace("[JIT Pass] Not a map in map instruction. Continue!");
           continue;
         }
       }
@@ -278,6 +280,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
             auto final_value = std::make_pair(ConstantPointerNull::get(Type::getInt8PtrTy(ctx_)), successGuardBB);
             CaseValues.emplace_back(std::move(final_value));
           } else {
+            spdlog::get("Morpheus")->debug("[JIT Pass] Starting DCE!!!");
             /*
               * This is for the dead code elimination.
               * I remove all the instructions (that are already dead)
@@ -286,12 +289,12 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
             while (Default->getFirstNonPHI() != helperInstruction) {
               Default->getFirstNonPHI()->eraseFromParent();
             }
-
             BasicBlock::iterator ii(helperInstruction);
-            helperInstruction->replaceAllUsesWith(ConstantPointerNull::get(llvm::Type::getInt8PtrTy(ctx_)));
-            // ReplaceInstWithValue(bb->getInstList(), ii,
-            //                       ConstantPointerNull::get(llvm::Type::getInt8PtrTy(ctx_)));
+            ReplaceInstWithValue(helperInstruction->getParent()->getInstList(), ii,
+                                  ConstantPointerNull::get(llvm::Type::getInt8PtrTy(ctx_)));
+
             instruction = bb->begin();
+            spdlog::get("Morpheus")->debug("[JIT Pass] DCE completed!!!");
             continue;
           }
         } else {
@@ -544,6 +547,34 @@ createPhi:
   EliminateUnreachableBlocks(pfn);
 #endif
   return modified;
+}
+
+void JITTableRuntimePass::deleteAllInstructionsInRange(llvm::LLVMContext &context, Instruction* startInst, Instruction* endInst) {
+    BasicBlock::iterator it(startInst);
+    BasicBlock::iterator it_end(endInst);
+    it_end--;
+
+    Instruction* currentInst ;
+
+    while (it != it_end ) {
+        currentInst = &*it;
+
+       // this cannot be done at the end of the while loop.
+       // has to be incremented before "erasing" the instruction
+        ++it;
+        if (it == it_end) continue;
+
+        if (!currentInst->use_empty()) {   
+          if (currentInst == endInst) {
+            currentInst->replaceAllUsesWith(ConstantPointerNull::get(llvm::Type::getInt8PtrTy(context)));
+          } else {
+            currentInst->replaceAllUsesWith(UndefValue::get(currentInst->getType()));
+          }
+        }
+
+        currentInst->eraseFromParent();
+    }
+
 }
 
 std::vector<std::string> JITTableRuntimePass::getEntriesFromInstrumentedMap(int originalMapFd, uint max_entries) {

@@ -91,7 +91,8 @@ namespace ebpf {
     }
 
     void MorpheusCompiler::initlogger() {
-      console = std::make_shared<spdlog::sinks::ansicolor_stdout_sink_mt>();
+      console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+      console->set_color(spdlog::level::trace, spdlog::string_view_t("\033[35m"));
       std::vector<spdlog::sink_ptr> sinks {console};
       logger = std::make_shared<spdlog::logger>("Morpheus", sinks.begin(), sinks.end());
       logger->flush_on(spdlog::level::trace);

@@ -125,6 +125,9 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
         spdlog::get("Morpheus")->debug("[BPFInstr Pass] No need to instrument map: {}. All entries can be offloaded (runtime_size <= MAX_OFFLOADED_ENTRIES)",
                  table->name);
         continue;
+      } else if (values.empty()) {
+        spdlog::get("Morpheus")->debug("[BPFInstr Pass] No need to instrument map: {}. The map is empty!", table->name);
+        continue;
       }
 
       spdlog::get("Morpheus")->debug("[BPFInstr Pass] Instrumenting map: {0} (fd: {1}), type: {2}", table->name, (int) table->fd,

@@ -22,13 +22,17 @@
 
 #ifdef SPDLOG_COMPILED_LIB
 #    undef SPDLOG_HEADER_ONLY
-#    if defined(_WIN32) && defined(SPDLOG_SHARED_LIB)
-#        ifdef spdlog_EXPORTS
-#            define SPDLOG_API __declspec(dllexport)
-#        else
-#            define SPDLOG_API __declspec(dllimport)
+#    if defined(SPDLOG_SHARED_LIB)
+#        if defined(_WIN32)
+#            ifdef spdlog_EXPORTS
+#                define SPDLOG_API __declspec(dllexport)
+#            else // !spdlog_EXPORTS
+#                define SPDLOG_API __declspec(dllimport)
+#            endif
+#        else // !defined(_WIN32)
+#            define SPDLOG_API __attribute__((visibility("default")))
 #        endif
-#    else // !defined(_WIN32) || !defined(SPDLOG_SHARED_LIB)
+#    else // !defined(SPDLOG_SHARED_LIB)
 #        define SPDLOG_API
 #    endif
 #    define SPDLOG_INLINE
@@ -167,7 +171,6 @@ struct is_convertible_to_basic_format_string
 #    if defined(SPDLOG_WCHAR_FILENAMES) || defined(SPDLOG_WCHAR_TO_UTF8_SUPPORT)
 using wstring_view_t = fmt::basic_string_view<wchar_t>;
 using wmemory_buf_t = fmt::basic_memory_buffer<wchar_t, 250>;
-;
 
 template<typename... Args>
 using wformat_string_t = fmt::wformat_string<Args...>;
@@ -205,7 +208,7 @@ using level_t = std::atomic<int>;
 
 // Log level enum
 namespace level {
-enum level_enum
+enum level_enum : int
 {
     trace = SPDLOG_LEVEL_TRACE,
     debug = SPDLOG_LEVEL_DEBUG,
@@ -317,11 +320,16 @@ struct file_event_handlers
 };
 
 namespace details {
+
 // make_unique support for pre c++14
 
 #if __cplusplus >= 201402L // C++14 and beyond
+using std::enable_if_t;
 using std::make_unique;
 #else
+template<bool B, class T = void>
+using enable_if_t = typename std::enable_if<B, T>::type;
+
 template<typename T, typename... Args>
 std::unique_ptr<T> make_unique(Args &&... args)
 {
@@ -329,6 +337,20 @@ std::unique_ptr<T> make_unique(Args &&... args)
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
 #endif
+
+// to avoid useless casts (see https://github.com/nlohmann/json/issues/2893#issuecomment-889152324)
+template<typename T, typename U, enable_if_t<!std::is_same<T, U>::value, int> = 0>
+constexpr T conditional_static_cast(U value)
+{
+    return static_cast<T>(value);
+}
+
+template<typename T, typename U, enable_if_t<std::is_same<T, U>::value, int> = 0>
+constexpr T conditional_static_cast(U value)
+{
+    return value;
+}
+
 } // namespace details
 } // namespace spdlog
 

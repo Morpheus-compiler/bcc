@@ -70,6 +70,7 @@ bool DynamicMapOptAnalysisPass::helperInstructionCanBeOptimized(llvm::Function &
 
 bool DynamicMapOptAnalysisPass::mapIsReadOnly(llvm::Function &F, llvm::AliasAnalysis &AA, llvm::MemorySSA &MSSA,
                           llvm::CallInst &mapLookupInstruction) {
+  spdlog::get("Morpheus")->trace("Running pass to check is map is Read Only");
   for (auto &bb : F) {
     for (auto &inst : bb) {
       auto mapUpdateInstruction = dyn_opt::utils::getCompleteBPFMapUpdateCallInst(inst);
