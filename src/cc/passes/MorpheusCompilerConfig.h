@@ -127,6 +127,7 @@ namespace ebpf {
         unsigned int optimizer_timeout_init = DYNAMIC_OPTIMIZED_TIMEOUT_INIT;
         unsigned int optimizer_timeout_steps = DYNAMIC_OPTIMIZER_TIMEOUT_STEPS;
         spdlog::level::level_enum log_level = spdlog::level::info;
+        std::set<std::string> tables_to_skip = {"index64", "ctl_array", "dp_rules"};
     };
 
     static std::string level_names[]{"TRACE","DEBUG","INFO","WARN","ERR","CRITICAL","OFF"};
@@ -204,13 +205,23 @@ struct convert<ebpf::MorpheusConfigStruct> {
     node["optimizer_timeout_init"] = rhs.optimizer_timeout_init;
     node["optimizer_timeout_steps"] = rhs.optimizer_timeout_steps;
     node["log_level"] = ebpf::logLevelToString(rhs.log_level);
+
+    std::vector<std::string> v(rhs.tables_to_skip.begin(), rhs.tables_to_skip.end());
+    node["tables_to_skip"] = v;
     return node;
   }
 
   static bool decode(const Node& node, ebpf::MorpheusConfigStruct& rhs) {
-    if(!node.IsMap() || node.size() != 15) {
+    if(!node.IsMap() || node.size() < 15) {
       std::cout << "Wrong format of YAML configuration file" << std::endl;
       return false;
+    }
+
+    if (node["tables_to_skip"]) {
+      if (!node["tables_to_skip"].IsSequence()) {
+        std::cout << "Wrong format of YAML configuration file: tables_to_skip should be an array" << std::endl;
+        return false;
+      }
     }
 
     rhs.enable_runtime_opts = node["enable_runtime_opts"].as<bool>();
@@ -228,6 +239,11 @@ struct convert<ebpf::MorpheusConfigStruct> {
     rhs.optimizer_timeout_init = node["optimizer_timeout_init"].as<unsigned int>();
     rhs.optimizer_timeout_steps = node["optimizer_timeout_steps"].as<unsigned int>();
     rhs.log_level = ebpf::stringToLogLevel(node["log_level"].as<std::string>());
+
+    std::vector<std::string> file_list = node["tables_to_skip"].as<std::vector<std::string>>();
+    // std::copy(file_list.begin(), file_list.end(), std::back_inserter(rhs.tables_to_skip));
+
+    std::copy(file_list.begin(), file_list.end(), std::inserter(rhs.tables_to_skip, rhs.tables_to_skip.end()));
     
     return true;
   }

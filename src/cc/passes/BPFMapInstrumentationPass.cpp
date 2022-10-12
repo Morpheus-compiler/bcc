@@ -101,8 +101,13 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
         table = getTableByFD(*ci);
       }
 
-      if (table->name == "index64" || table->name == "ctl_array" || table->name == "dp_rules") 
+      auto &config = MorpheusCompiler::getInstance().get_config();
+      if (std::find(config.tables_to_skip.begin(), config.tables_to_skip.end(), table->name) != config.tables_to_skip.end()) {
+        spdlog::get("Morpheus")->debug("[JIT Pass] Skip table {}", table->name);
         continue;
+      }
+      // if (table->name == "index64" || table->name == "ctl_array" || table->name == "dp_rules") 
+      //   continue;
 
       if (!dyn_opt::utils::mapCanBeInstrumented(table)) {
         spdlog::get("Morpheus")->debug("[BPFInstr Pass] Skipping map: {} since it cannot be instrumented", table->name);

@@ -191,7 +191,13 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
           continue;
         }
 
-        if (table->name == "index64" || table->name == "ctl_array" || table->name == "dp_rules") continue;  
+        auto &config = MorpheusCompiler::getInstance().get_config();
+        if (std::find(config.tables_to_skip.begin(), config.tables_to_skip.end(), table->name) != config.tables_to_skip.end()) {
+          spdlog::get("Morpheus")->debug("[JIT Pass] Skip table {}", table->name);
+          continue;
+        }
+
+        // if (table->name == "index64" || table->name == "ctl_array" || table->name == "dp_rules") continue;  
         
         std::vector<std::pair<std::string, std::string>> values;
 
@@ -280,7 +286,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
             auto final_value = std::make_pair(ConstantPointerNull::get(Type::getInt8PtrTy(ctx_)), successGuardBB);
             CaseValues.emplace_back(std::move(final_value));
           } else {
-            spdlog::get("Morpheus")->debug("[JIT Pass] Starting DCE!!!");
+            spdlog::get("Morpheus")->info("[JIT Pass] Performing DCE for empty table {}", table->name);
             /*
               * This is for the dead code elimination.
               * I remove all the instructions (that are already dead)
@@ -294,7 +300,6 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
                                   ConstantPointerNull::get(llvm::Type::getInt8PtrTy(ctx_)));
 
             instruction = bb->begin();
-            spdlog::get("Morpheus")->debug("[JIT Pass] DCE completed!!!");
             continue;
           }
         } else {
@@ -510,7 +515,7 @@ createPhi:
         helperInstruction->setMetadata("opt.hasBeenProcessed", N);
 
         if (values.size() <= CaseValues.size() && table->is_read_only && dynamic_opt_compiler.isMapROAcrossModules(table->fd) && table->type != BPF_MAP_TYPE_LPM_TRIE) {
-          spdlog::get("Morpheus")->info("[JIT Pass] Performing DCE for this table, since the entries are small.");
+          spdlog::get("Morpheus")->info("[JIT Pass] Performing DCE for JITed table {}, since the entries are small.", table->name);
           /*
             * This is for the dead code elimination.
             * I remove all the instructions (that are already dead)
