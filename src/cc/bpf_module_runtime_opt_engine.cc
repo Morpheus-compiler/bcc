@@ -137,13 +137,13 @@ namespace ebpf {
         // Record end time
         auto compiler_finish = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> compiler_elapsed = compiler_finish - compiler_start;
-        spdlog::get("Morpheus")->info("[bpf_module]Time to execute run_dyn_pass_manager: {} ms", compiler_elapsed.count());
+        spdlog::get("Morpheus")->info("[bpf_module] Time to execute run_dyn_pass_manager: {} ms", compiler_elapsed.count());
 
         compiler_start = std::chrono::high_resolution_clock::now();
         int final_res = finalize_runtime_module();
         compiler_finish = std::chrono::high_resolution_clock::now();
         compiler_elapsed = compiler_finish - compiler_start;
-        spdlog::get("Morpheus")->info("[bpf_module]Time to execute finalize_runtime_module: {} ms", compiler_elapsed.count());
+        spdlog::get("Morpheus")->info("[bpf_module] Time to execute finalize_runtime_module: {} ms", compiler_elapsed.count());
 
         Function *new_func = engine_->FindFunctionNamed(func_name);
         auto hash1 = FunctionComparator::functionHash(*new_func);
