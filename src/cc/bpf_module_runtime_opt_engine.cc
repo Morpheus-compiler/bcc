@@ -137,13 +137,13 @@ namespace ebpf {
         // Record end time
         auto compiler_finish = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> compiler_elapsed = compiler_finish - compiler_start;
-        spdlog::get("Morpheus")->info("[bpf_module] Time to execute run_dyn_pass_manager: {} ms", compiler_elapsed.count());
+        spdlog::get("Morpheus")->debug("[bpf_module] Time to execute run_dyn_pass_manager: {} ms", compiler_elapsed.count());
 
         compiler_start = std::chrono::high_resolution_clock::now();
         int final_res = finalize_runtime_module();
         compiler_finish = std::chrono::high_resolution_clock::now();
         compiler_elapsed = compiler_finish - compiler_start;
-        spdlog::get("Morpheus")->info("[bpf_module] Time to execute finalize_runtime_module: {} ms", compiler_elapsed.count());
+        spdlog::get("Morpheus")->debug("[bpf_module] Time to execute finalize_runtime_module: {} ms", compiler_elapsed.count());
 
         Function *new_func = engine_->FindFunctionNamed(func_name);
         auto hash1 = FunctionComparator::functionHash(*new_func);
@@ -151,12 +151,12 @@ namespace ebpf {
 
         dyn_opt_runs++;
         if ((hash1 == hash2) && (saved_offloaded_entries_ == offloaded_entries) && !MorpheusCompiler::getInstance().get_config().always_swap_program) {
-          spdlog::get("Morpheus")->info("[bpf_module] No changes detected, skipping reloading");
+          spdlog::get("Morpheus")->debug("[bpf_module] No changes detected, skipping reloading");
           return BPFModule::NO_MODULE_CHANGES;
         } else {
           current_func = new_func;
           saved_offloaded_entries_ = offloaded_entries;
-          spdlog::get("Morpheus")->info("[bpf_module] Changes detected, reloading!");
+          spdlog::get("Morpheus")->debug("[bpf_module] Changes detected, reloading!");
         }
         return final_res;
       }

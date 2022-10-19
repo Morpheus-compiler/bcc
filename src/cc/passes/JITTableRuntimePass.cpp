@@ -286,7 +286,7 @@ bool JITTableRuntimePass::runOnFunction(Function &pfn) {
             auto final_value = std::make_pair(ConstantPointerNull::get(Type::getInt8PtrTy(ctx_)), successGuardBB);
             CaseValues.emplace_back(std::move(final_value));
           } else {
-            spdlog::get("Morpheus")->info("[JIT Pass] Performing DCE for empty table {}", table->name);
+            spdlog::get("Morpheus")->debug("[JIT Pass] Performing DCE for empty table {}", table->name);
             /*
               * This is for the dead code elimination.
               * I remove all the instructions (that are already dead)
@@ -515,7 +515,7 @@ createPhi:
         helperInstruction->setMetadata("opt.hasBeenProcessed", N);
 
         if (values.size() <= CaseValues.size() && table->is_read_only && dynamic_opt_compiler.isMapROAcrossModules(table->fd) && table->type != BPF_MAP_TYPE_LPM_TRIE) {
-          spdlog::get("Morpheus")->info("[JIT Pass] Performing DCE for JITed table {}, since the entries are small.", table->name);
+          spdlog::get("Morpheus")->debug("[JIT Pass] Performing DCE for JITed table {}, since the entries are small.", table->name);
           /*
             * This is for the dead code elimination.
             * I remove all the instructions (that are already dead)

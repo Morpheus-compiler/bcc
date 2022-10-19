@@ -147,7 +147,7 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
       struct bpf_map_info info = {};
       uint32_t info_len = sizeof(info);
       bpf_obj_get_info(inst_fd, &info, &info_len);
-      spdlog::get("Morpheus")->info("[BPFInstr Pass] Instrumented map for original map: {0} has been created with fd: {1}, and id: {2}",
+      spdlog::get("Morpheus")->debug("[BPFInstr Pass] Instrumented map for original map: {0} has been created with fd: {1}, and id: {2}",
                 table->name, inst_fd, info.id);
 
       // Now that we have the instrumented map, we should create the corresponding call to update the value
@@ -178,7 +178,7 @@ bool BPFMapInstrumentationPass::runOnFunction(Function &pfn) {
       bb = Default->getIterator();
       instruction = bb->begin();
 
-      spdlog::get("Morpheus")->info("[BPFInstr Pass] Instrumentation completed for map: {}", table->name);
+      spdlog::get("Morpheus")->debug("[BPFInstr Pass] Instrumentation completed for map: {}", table->name);
     }
   }
 
