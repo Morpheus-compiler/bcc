@@ -184,6 +184,22 @@ class BPF {
   }
 
   template <class ValueType>
+  BPFInodeStorageTable<ValueType> get_inode_storage_table(const std::string& name) {
+    TableStorage::iterator it;
+    if (bpf_module_->table_storage().Find(Path({bpf_module_->id(), name}), it))
+      return BPFInodeStorageTable<ValueType>(it->second);
+    return BPFInodeStorageTable<ValueType>({});
+  }
+
+  template <class ValueType>
+  BPFTaskStorageTable<ValueType> get_task_storage_table(const std::string& name) {
+    TableStorage::iterator it;
+    if (bpf_module_->table_storage().Find(Path({bpf_module_->id(), name}), it))
+      return BPFTaskStorageTable<ValueType>(it->second);
+    return BPFTaskStorageTable<ValueType>({});
+  }
+
+  template <class ValueType>
   BPFCgStorageTable<ValueType> get_cg_storage_table(const std::string& name) {
     TableStorage::iterator it;
     if (bpf_module_->table_storage().Find(Path({bpf_module_->id(), name}), it))
@@ -269,7 +285,7 @@ class BPF {
   int poll_perf_buffer(const std::string& name, int timeout_ms = -1);
 
   StatusTuple load_func(const std::string& func_name, enum bpf_prog_type type,
-                        int& fd, bool force_loading = false, unsigned flags = 0);
+                        int& fd, bool force_loading = false, unsigned flags = 0, enum bpf_attach_type = (bpf_attach_type) -1);
   StatusTuple unload_func(const std::string& func_name);
   StatusTuple unload_func(const int &fd);
 

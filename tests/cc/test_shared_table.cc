@@ -34,17 +34,17 @@ TEST_CASE("test shared table", "[shared_table]") {
 
   ebpf::StatusTuple res(0);
 
-  res = bpf1a.init(BPF_PROGRAM1);
-  REQUIRE(res.code() == 0);
+  res = bpf_ns1_a.init(BPF_PROGRAM1);
+  REQUIRE(res.ok());
 
-  res = bpf1b.init(BPF_PROGRAM2);
-  REQUIRE(res.code() == 0);
+  res = bpf_ns1_b.init(BPF_PROGRAM2);
+  REQUIRE(res.ok());
 
-  res = bpf2a.init(BPF_PROGRAM1);
-  REQUIRE(res.code() == 0);
+  res = bpf_ns2_a.init(BPF_PROGRAM1);
+  REQUIRE(res.ok());
 
-  res = bpf2b.init(BPF_PROGRAM2);
-  REQUIRE(res.code() == 0);
+  res = bpf_ns2_b.init(BPF_PROGRAM2);
+  REQUIRE(res.ok());
 
   // get references to all tables
   ebpf::BPFArrayTable<int> t1a = bpf1a.get_array_table<int>("mysharedtable");
@@ -54,22 +54,22 @@ TEST_CASE("test shared table", "[shared_table]") {
 
   // test that tables within the same ns are shared
   int v1, v2, v3;
-  res = t1a.update_value(13, 42);
-  REQUIRE(res.code() == 0);
+  res = t_ns1_a.update_value(13, 42);
+  REQUIRE(res.ok());
 
-  res = t1b.get_value(13, v1);
-  REQUIRE(res.code() == 0);
+  res = t_ns1_b.get_value(13, v1);
+  REQUIRE(res.ok());
   REQUIRE(v1 == 42);
 
   // test that tables are isolated within different ns
-  res = t2a.update_value(13, 69);
-  REQUIRE(res.code() == 0);
+  res = t_ns2_a.update_value(13, 69);
+  REQUIRE(res.ok());
 
-  res = t2b.get_value(13, v2);
-  REQUIRE(res.code() == 0);
+  res = t_ns2_b.get_value(13, v2);
+  REQUIRE(res.ok());
   REQUIRE(v2 == 69);
 
-  res = t1b.get_value(13, v3);
-  REQUIRE(res.code() == 0);
+  res = t_ns1_b.get_value(13, v3);
+  REQUIRE(res.ok());
   REQUIRE(v3 == 42);  // value should still be 42
 }

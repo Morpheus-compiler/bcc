@@ -180,10 +180,12 @@ namespace ebpf {
       if (update_maps(sections_))
         return -1;
 
+      finalize_prog_func_info();
+
       // give functions an id
       for (const auto &section : sections_)
-        if (!strncmp(FN_PREFIX.c_str(), section.first.c_str(), FN_PREFIX.size()))
-          function_names_.push_back(section.first);    
+        if (!strncmp((std::string(BPF_FN_PREFIX)).c_str(), section.first.c_str(), (std::string(BPF_FN_PREFIX)).size()))
+          function_names_.push_back(section.first);
 
       // dump_ir_to_file(*mod_runtime_ptr_, "optimized.bc");
       

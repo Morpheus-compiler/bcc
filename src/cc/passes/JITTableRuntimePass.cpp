@@ -711,7 +711,7 @@ int JITTableRuntimePass::createGuardMap(TableDesc &original_map) {
   //map_flags = original_map.flags;
   map_flags = 0;
 
-  struct bpf_create_map_attr attr = {};
+  struct bcc_create_map_attr attr = {};
   attr.map_type = (enum bpf_map_type) map_type;
   attr.name = map_name;
   attr.key_size = key_size;

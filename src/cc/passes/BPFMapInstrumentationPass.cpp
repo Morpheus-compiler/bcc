@@ -275,7 +275,7 @@ int BPFMapInstrumentationPass::createInstrumentedMap(TableDesc &original_map) {
     max_entries = 50*100;
   }
 
-  struct bpf_create_map_attr attr = {};
+  struct bcc_create_map_attr attr = {};
   attr.map_type = (enum bpf_map_type) map_type;
   attr.name = map_name;
   attr.key_size = key_size;
