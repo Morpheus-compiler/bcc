@@ -4,13 +4,11 @@ on: push
 
 jobs:
   test_bcc:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
-        os: [ubuntu-18.04, ubuntu-20.04, ubuntu-latest] # 18.04.3 release has 5.0.0 kernel
+        os: [{version: "18.04", nick: bionic}, {version: "20.04", nick: focal}]
         env:
-        - TYPE: Debug
-          PYTHON_TEST_LOGFILE: critical.log
         - TYPE: Release
           PYTHON_TEST_LOGFILE: critical.log
     steps:
@@ -23,7 +21,10 @@ jobs:
         ip addr
     - name: Build docker container with all deps
       run: |
-        docker build -t bcc-docker -f Dockerfile.tests .
+        docker build \
+        --build-arg UBUNTU_VERSION=${{ matrix.os.version }} \
+        --build-arg UBUNTU_SHORTNAME=${{ matrix.os.nick }} \
+        -t bcc-docker -f docker/Dockerfile.tests .
     - name: Run bcc build
       env: ${{ matrix.env }}
       run: |
