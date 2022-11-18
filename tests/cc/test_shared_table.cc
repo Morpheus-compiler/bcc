@@ -27,10 +27,10 @@ BPF_TABLE("extern", int, int, mysharedtable, 1024);
 
 TEST_CASE("test shared table", "[shared_table]") {
   // deploy 4 ebpf programs: 1a and 1b are in ns1, 2a and 2b in ns2
-  ebpf::BPF bpf1a(0, nullptr, false, "ns1");
-  ebpf::BPF bpf1b(0, nullptr, false, "ns1");
-  ebpf::BPF bpf2a(0, nullptr, false, "ns2");
-  ebpf::BPF bpf2b(0, nullptr, false, "ns2");
+  ebpf::BPF bpf_ns1_a(0, nullptr, false, "ns1");
+  ebpf::BPF bpf_ns1_b(0, nullptr, false, "ns1");
+  ebpf::BPF bpf_ns2_a(0, nullptr, false, "ns2");
+  ebpf::BPF bpf_ns2_b(0, nullptr, false, "ns2");
 
   ebpf::StatusTuple res(0);
 
@@ -47,10 +47,10 @@ TEST_CASE("test shared table", "[shared_table]") {
   REQUIRE(res.ok());
 
   // get references to all tables
-  ebpf::BPFArrayTable<int> t1a = bpf1a.get_array_table<int>("mysharedtable");
-  ebpf::BPFArrayTable<int> t1b = bpf1b.get_array_table<int>("mysharedtable");
-  ebpf::BPFArrayTable<int> t2a = bpf2a.get_array_table<int>("mysharedtable");
-  ebpf::BPFArrayTable<int> t2b = bpf2b.get_array_table<int>("mysharedtable");
+  ebpf::BPFArrayTable<int> t_ns1_a = bpf_ns1_a.get_array_table<int>("mysharedtable");
+  ebpf::BPFArrayTable<int> t_ns1_b = bpf_ns1_b.get_array_table<int>("mysharedtable");
+  ebpf::BPFArrayTable<int> t_ns2_a = bpf_ns2_a.get_array_table<int>("mysharedtable");
+  ebpf::BPFArrayTable<int> t_ns2_b = bpf_ns2_b.get_array_table<int>("mysharedtable");
 
   // test that tables within the same ns are shared
   int v1, v2, v3;
