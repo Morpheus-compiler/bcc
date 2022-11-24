@@ -228,7 +228,7 @@ namespace ebpf {
                     std::bind(&BPFModule::snprintf_instrumentation, this, make_writer(&*m, leaf_type),
                               _1, _2, _3);
             int instrumented_map_fd = table.fd;
-            spdlog::get("Morpheus")->debug("Annotating runtime module for instrumented map with fd: %d", instrumented_map_fd);
+            spdlog::get("Morpheus")->debug("Annotating runtime module for instrumented map with fd: {}", instrumented_map_fd);
           }
         }
       }
