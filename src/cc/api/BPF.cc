@@ -238,7 +238,6 @@ void BPF::enable_morpheus() {
 
 BPF::~BPF() {
     if (dynamic_opt_enabled_) {
-      quit_thread_ = true;
       std::lock_guard<std::mutex> opt_guard(opt_mutex_);
       auto &dynamic_compiler = MorpheusCompiler::getInstance();
       if (dynamic_compiler.get_config().enable_guards_update) {
